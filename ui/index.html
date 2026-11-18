@@ -365,9 +365,9 @@
 
 <div>
 
-<h1>Liquid Glass for Windows<small id="ver">v2.1.0</small></h1>
+<h1>Liquid Glass for Windows<small id="ver">v2.2.0</small></h1>
 
-<div class="sub">桌面原生光學圖示立即可用｜工作列與開始功能表為 Windhawk 選用擴充</div>
+<div class="sub">桌面原生光學圖示立即可用｜工作列、開始功能表與通知列為 Windhawk 選用擴充</div>
 
 </div>
 
@@ -523,11 +523,11 @@
 
 <div class="card">
 
-<div class="card-title"><span>全區批次控制</span><span class="note" id="batchNote">一次套用核心三區：工作列、開始功能表、桌面（通知列為獨立測試分頁）</span></div>
+<div class="card-title"><span>全區批次控制</span><span class="note" id="batchNote">一次套用全部四區：工作列、開始功能表、桌面、通知列（亦可切至各分頁獨立調整與啟閉）</span></div>
 
 <div class="btns">
 
-<button class="btn primary" id="btnApplyAll" type="button">✨ 一鍵套用核心三區</button>
+<button class="btn primary" id="btnApplyAll" type="button">✨ 一鍵套用全部四區</button>
 
 <button class="btn danger" id="btnRestoreAll" type="button">🛡️ 一鍵還原全部區域</button>
 
@@ -615,7 +615,7 @@ function updateBatchUI() {
 
     $('batchNote').textContent = whOk
 
-      ? '一次套用核心三區：工作列、開始功能表、桌面（通知列於第 4 分頁獨立測試，「一鍵還原」會安全一併停用）'
+      ? '一次套用全部四區：工作列、開始功能表、桌面、通知列（亦可切至各分頁個別獨立調整與啟閉）'
 
       : '未偵測到 Windhawk，批次控制僅執行獨立的「桌面區」';
 
@@ -623,7 +623,7 @@ function updateBatchUI() {
 
   if ($('btnApplyAll')) {
 
-    $('btnApplyAll').textContent = whOk ? '✨ 一鍵套用核心三區' : '✨ 一鍵套用可用區域（桌面）';
+    $('btnApplyAll').textContent = whOk ? '✨ 一鍵套用全部四區' : '✨ 一鍵套用可用區域（桌面）';
 
   }
 
@@ -995,7 +995,7 @@ $('btnRestoreScope').addEventListener('click', () => {
 
 $('btnApplyAll').addEventListener('click', () => {
 
-  const msg = isWhAvailable() ? '正在套用核心三區 Liquid Glass…' : '正在套用桌面 Liquid Glass…';
+  const msg = isWhAvailable() ? '正在套用全部四區 Liquid Glass…' : '正在套用桌面 Liquid Glass…';
 
   run(a => a.apply_all(cfg), msg);
 
@@ -1097,7 +1097,7 @@ const ENGINE_META = {
 
   startmenu: { title: '開始功能表即時光學引擎', label: '已追蹤圖示／渲染', unit: '顆圖示', maxEnt: 256 },
 
-  tray: { title: '通知列即時光學引擎（獨立測試）', label: '已追蹤托盤／渲染', unit: '顆托盤圖示', maxEnt: 128 },
+  tray: { title: '通知列即時光學引擎', label: '已追蹤托盤／渲染', unit: '顆托盤圖示', maxEnt: 128 },
 
 };
 

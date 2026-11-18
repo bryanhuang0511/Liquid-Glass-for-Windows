@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-# Lines 15-35: 版本號與四區範圍狀態（tray 為第 4 獨立測試區）
-VERSION = "2.1.0"
+# Lines 15-35: 版本號與四區範圍狀態（全部四區正式開放，支援一鍵四區＋個別獨立）
+VERSION = "2.2.0"
 
 # 演算法或輸出格式變動時 +1，IconVault 的渲染快取會自動失效並重新生成。
 RENDER_VERSION = 7
@@ -263,16 +263,16 @@ SPECS: dict[str, dict[str, Any]] = {
         "id": "tray",
         "label": "通知列",
         "icon": "🔔",
-        "style": "Windhawk 獨立測試擴充（選用引擎）",
+        "style": "Windhawk 選用擴充（即時引擎）",
         "summary": (
-            "獨立於核心三區的實驗性擴充（v2.1 測試版）；專責轉換右下角常駐系統匣與「^」隱藏圖示溢位區，"
-            "不含「一鍵套用核心三區」自動啟用，可隨時在此分頁獨立啟閉與即時還原。"
+            "需搭配 Windhawk；即時轉換右下角常駐系統匣與「^」溢位區圖示（支援 1024px 高解析點陣圖與 HWiNFO64 預設白名單），"
+            "已納入「一鍵套用全部四區」，亦可隨時在此分頁個別獨立啟閉與調整。"
         ),
         "requires_windhawk": True,
-        "experimental": True,
+        "experimental": False,
         "advisory": (
-            "獨立測試須知：本區改掛 SystemTray.dll 已載入視覺層（ImageIconContent），刻意避開與間距／置頂外掛重疊的建構子；"
-            "目前不包含一鍵批次套用（但「一鍵還原」會安全一併停用），建議先於此分頁獨立測試展開「^」溢位匣與點擊圖示穩定度。"
+            "提示：已納入一鍵套用全部四區，亦可於本分頁獨立調整參數、單獨啟閉或編輯下方通知列排除白名單"
+            "（預設保護 HWiNFO64 動態感測器保留原色、避免每秒重繪）。"
         ),
         "framed": False,
         "actual_px": 20,

@@ -7,10 +7,10 @@ from liquid_glass import specs as S
 
 
 def test_config_migration_does_not_pollute_taskbar():
-    assert S.VERSION == "2.1.0"
+    assert S.VERSION == "2.2.0"
     assert S.SCOPES == ("desktop", "startmenu", "taskbar", "tray")
-    assert S.SPECS["tray"]["experimental"] is True and S.SPECS["tray"]["actual_px"] == 20
-    assert all(not S.SPECS[sc]["experimental"] for sc in ("desktop", "startmenu", "taskbar"))
+    assert S.SPECS["tray"]["actual_px"] == 20
+    assert all(not S.SPECS[sc]["experimental"] for sc in S.SCOPES)
     cfg = S.migrate_config({"line_strength": 1.9, "glow_amount": 0.35, "film_opacity": 0.88})
     assert cfg["desktop"] == S.default_params("desktop") == {"opacity": 1.0, "frost": 1.0, "glow": 1.0, "dark_protect": 1.0}
     assert cfg["taskbar"] == S.default_params("taskbar") == {"opacity": 1.0, "frost": 1.0, "glow": 1.0, "dark_protect": 1.0}

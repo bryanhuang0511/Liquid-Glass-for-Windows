@@ -895,8 +895,8 @@ def _restore_legacy_windhawk_shortcuts(scope: str) -> dict[str, int]:
     return {"restored": restored, "untouched": untouched}
 
 
-def effective_active_scopes(wh_dir: str | None = None, *, include_experimental: bool = False) -> list[str]:
-    """回傳本機目前可用的區域；未安裝 Windhawk 時自動退回純桌面核心，且預設不含實驗性獨立分頁。"""
+def effective_active_scopes(wh_dir: str | None = None, *, include_experimental: bool = True) -> list[str]:
+    """回傳本機目前可用的全部區域（安裝 Windhawk 時涵蓋四區：工作列／開始功能表／桌面／通知列；未安裝時自動退回純桌面核心）。"""
     wh_ok = WB.is_windhawk_installed(wh_dir)
     return [
         sc
@@ -907,7 +907,7 @@ def effective_active_scopes(wh_dir: str | None = None, *, include_experimental: 
 
 
 def restore_live_scopes_on_exit(wh_dir: str | None = None) -> list[dict[str, Any]]:
-    """退出時自動停用所有已啟用的 Windhawk 即時引擎（工作列／開始功能表），不動桌面實體捷徑。"""
+    """退出時自動停用所有已啟用的 Windhawk 即時引擎（工作列／開始功能表／通知列），不動桌面實體捷徑。"""
     if not WB.is_windhawk_installed(wh_dir):
         return []
     out: list[dict[str, Any]] = []

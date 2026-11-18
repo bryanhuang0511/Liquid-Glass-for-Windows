@@ -213,8 +213,8 @@ class LiquidGlassApi:
         return self._batch_response("restore", SM.run_batch("restore", [scope], self._app.config))
 
     def apply_all(self, all_params: dict[str, Any]) -> dict[str, Any]:
-        """套用目前系統所有可用核心區域（未裝 Windhawk 時自動僅套用桌面，不含獨立測試分頁）。"""
-        scopes = SM.effective_active_scopes(include_experimental=False) or ["desktop"]
+        """一次套用目前系統所有可用區域（已安裝 Windhawk 時涵蓋全部四區；未裝時自動僅套用桌面）。"""
+        scopes = SM.effective_active_scopes() or ["desktop"]
         for sc in scopes:
             if isinstance(all_params, dict) and sc in all_params:
                 self._app.config[sc] = S.clamp_params(sc, all_params[sc])
@@ -222,8 +222,8 @@ class LiquidGlassApi:
         return self._batch_response("apply", SM.run_batch("apply", scopes, self._app.config))
 
     def restore_all(self) -> dict[str, Any]:
-        """還原目前系統所有可用區域（含獨立測試擴充，確保安全回復原廠外觀）。"""
-        scopes = SM.effective_active_scopes(include_experimental=True) or ["desktop"]
+        """一次還原目前系統所有可用區域，確保安全回復原廠外觀。"""
+        scopes = SM.effective_active_scopes() or ["desktop"]
         return self._batch_response("restore", SM.run_batch("restore", scopes, self._app.config))
 
     def get_progress(self) -> dict[str, Any]:
