@@ -2,6 +2,10 @@
 
 All notable changes to **Liquid Glass for Windows** will be documented in this file.
 
+## [v2.2.0] - 2026-11-18
+### Changed
+- **Unified Four-Scope One-Click Apply + Independent Per-Scope Controls**: Promoted System Tray (`tray`) out of experimental opt-in isolation (`experimental = false` in `liquid_glass/specs.py`). Global batch controls (`apply_all`, `restore_all`, CLI `--apply`, UI `#btnApplyAll`, and Tray quick actions) now apply all four areas together (`taskbar`, `startmenu`, `desktop`, `tray`) when Windhawk is detected while preserving individual per-tab apply/restore/tuning and the notification-area process whitelist.
+
 ## [v2.1.0] - 2026-11-18
 ### Added
 - **Experimental 4th Scope — System Tray & Overflow (`tray`)**: Added an isolated 4th UI tab (`🔔 通知列`) and dedicated Windhawk mod (`windhawk/liquid_glass_tray.wh.cpp`, `local@liquid-glass-tray-icons`) using `GetTaskbarXamlRoot` cold-start sweeps (`Shell_TrayWnd` / `Shell_SecondaryTrayWnd` via `RunFromWindowThread` + `IsReadableMemory` `VirtualQuery` guards), `NotificationAreaOverflow::OnApplyTemplate`/`ArrangeOverride`, and guarded `OverflowXamlIslandManager::Show` sweeps (`CoreDispatcherPriority::Low`) with zero constructor collision against spacing/on-top mods and `12 MiB` LRU cache.
