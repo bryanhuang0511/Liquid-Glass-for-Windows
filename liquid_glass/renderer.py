@@ -572,7 +572,7 @@ def render_native(scope, src, p, size):
 def render_layers(scope, src, params, sizes=ICO_SIZES):
     """回傳 {尺寸: RGBA 影像}。"""
     p = clamp_params(scope, params)
-    if scope in ("desktop", "taskbar", "startmenu"):
+    if scope in ("desktop", "taskbar", "startmenu", "tray"):
         base = render_optical_liquid_glass(src, p, scope=scope)
         return {s: _finalize_optical_size(base, s) for s in sizes}
     return {s: render_native(scope, src, p, s) for s in sizes}
@@ -588,7 +588,7 @@ def render_preview(scope, src, params, size):
     """UI 預覽：回傳 size×size 的 RGBA。size 為實際輸出像素。"""
     p = clamp_params(scope, params)
     size = int(max(8, min(256, size)))
-    if scope in ("desktop", "taskbar", "startmenu"):
+    if scope in ("desktop", "taskbar", "startmenu", "tray"):
         return _finalize_optical_size(render_optical_liquid_glass(src, p, scope=scope), size)
     return render_native(scope, src, p, size)
 # ============================================================================

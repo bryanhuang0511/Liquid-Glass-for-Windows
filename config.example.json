@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
+  "version": "2.1.0",
   "desktop": {
     "opacity": 1.0,
     "frost": 1.0,
@@ -18,6 +18,13 @@
     "glow": 1.0,
     "dark_protect": 1.0
   },
+  "tray": {
+    "opacity": 1.0,
+    "frost": 1.0,
+    "glow": 1.0,
+    "dark_protect": 1.0
+  },
+  "tray_whitelist": "HWiNFO64.exe;HWiNFO32.exe;HWiNFO",
   "watcher": {
     "enabled": false,
     "debounce_sec": 3.0

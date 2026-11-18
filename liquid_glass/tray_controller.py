@@ -12,7 +12,10 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
+import time
+import traceback
 from typing import Any
 
 from liquid_glass import desktop_watcher as DW
@@ -28,19 +31,102 @@ _TRAY_STOP_EVENT_NAME = "Local\\LiquidGlassForWindows_Tray_Stop"
 _TRAY_STOP_EVENT: Any = None
 
 
+def _make_same_user_sa() -> tuple[Any, Any]:
+    """建立同登入使用者（含標準與管理員權限）跨 Integrity Level 共享的 Security Attributes。"""
+    if not RT.IS_WIN:
+        return None, None
+    try:
+        from ctypes import wintypes
+
+        TOKEN_QUERY = 0x0008
+        TokenUser = 1
+        k32 = ctypes.windll.kernel32
+        advapi32 = ctypes.windll.advapi32
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.LocalFree.argtypes = [ctypes.c_void_p]
+        k32.LocalFree.restype = ctypes.c_void_p
+        advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+        advapi32.OpenProcessToken.restype = wintypes.BOOL
+        advapi32.GetTokenInformation.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        advapi32.GetTokenInformation.restype = wintypes.BOOL
+        advapi32.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_void_p,
+        ]
+        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
+
+        class _SECURITY_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [
+                ("nLength", wintypes.DWORD),
+                ("lpSecurityDescriptor", ctypes.c_void_p),
+                ("bInheritHandle", wintypes.BOOL),
+            ]
+
+        h_tok = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(k32.GetCurrentProcess(), TOKEN_QUERY, ctypes.byref(h_tok)):
+            return None, None
+        try:
+            needed = wintypes.DWORD(0)
+            advapi32.GetTokenInformation(h_tok, TokenUser, None, 0, ctypes.byref(needed))
+            if not needed.value:
+                return None, None
+            buf = (ctypes.c_ubyte * needed.value)()
+            if not advapi32.GetTokenInformation(h_tok, TokenUser, buf, needed, ctypes.byref(needed)):
+                return None, None
+            sid_ptr = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]
+            str_ptr = ctypes.c_void_p()
+            if not advapi32.ConvertSidToStringSidW(sid_ptr, ctypes.byref(str_ptr)):
+                return None, None
+            try:
+                user_sid = ctypes.wstring_at(str_ptr.value)
+            finally:
+                k32.LocalFree(str_ptr)
+        finally:
+            RT.kernel32.CloseHandle(h_tok)
+
+        if not user_sid:
+            return None, None
+        sddl = f"D:(A;;GA;;;{user_sid})(A;;GA;;;BA)S:(ML;;NW;;;LW)"
+        sd_ptr = ctypes.c_void_p()
+        if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(sd_ptr), None):
+            return None, None
+        sa = _SECURITY_ATTRIBUTES(ctypes.sizeof(_SECURITY_ATTRIBUTES), sd_ptr.value, False)
+        return sa, sd_ptr
+    except Exception:
+        return None, None
+
+
 def _init_tray_stop_event() -> Any:
     """於系統匣行程初始化可跨行程觸發的命名停止事件。"""
     global _TRAY_STOP_EVENT
     if not RT.IS_WIN or RT.kernel32 is None:
         return None
+    sa, sd_ptr = _make_same_user_sa()
     try:
-        handle = RT.kernel32.CreateEventW(None, True, False, _TRAY_STOP_EVENT_NAME)
+        sa_ref = ctypes.byref(sa) if sa is not None else None
+        handle = RT.kernel32.CreateEventW(sa_ref, True, False, _TRAY_STOP_EVENT_NAME)
         if handle:
             RT.kernel32.ResetEvent(handle)
             _TRAY_STOP_EVENT = handle
         return handle
     except Exception:
         return None
+    finally:
+        if sd_ptr:
+            try:
+                ctypes.windll.kernel32.LocalFree(sd_ptr)
+            except Exception:
+                pass
 
 
 def _signal_tray_stop() -> bool:
@@ -68,20 +154,20 @@ def _wait_tray_stop(timeout_sec: float) -> bool:
             return RT.kernel32.WaitForSingleObject(_TRAY_STOP_EVENT, ms) == 0
         except Exception:
             pass
-    import time
-
     time.sleep(timeout_sec)
     return False
 
 
 def is_tray_running() -> bool:
-    """查詢背景系統匣是否正在執行。"""
+    """查詢背景系統匣是否正在執行（含跨權限鎖偵測）。"""
     if not RT.IS_WIN or RT.kernel32 is None:
         return False
     try:
         handle = RT.kernel32.OpenMutexW(0x00100000, False, _TRAY_MUTEX_NAME)  # SYNCHRONIZE
         if handle:
             RT.kernel32.CloseHandle(handle)
+            return True
+        if ctypes.get_last_error() == 5:  # ERROR_ACCESS_DENIED：不同權限之系統匣互斥鎖已存在
             return True
     except Exception:
         pass
@@ -93,35 +179,101 @@ def acquire_tray_mutex() -> bool:
     global _TRAY_MUTEX
     if not RT.IS_WIN or RT.kernel32 is None:
         return True
+    sa, sd_ptr = _make_same_user_sa()
     try:
-        handle = RT.kernel32.CreateMutexW(None, False, _TRAY_MUTEX_NAME)
-        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        sa_ref = ctypes.byref(sa) if sa is not None else None
+        handle = RT.kernel32.CreateMutexW(sa_ref, False, _TRAY_MUTEX_NAME)
+        err = ctypes.get_last_error()
+        if not handle:
+            return False if err == 5 else True
+        if err == 183:  # ERROR_ALREADY_EXISTS
+            RT.kernel32.CloseHandle(handle)
             return False
         _TRAY_MUTEX = handle
+        _init_tray_stop_event()
         return True
     except Exception:
         return True
+    finally:
+        if sd_ptr:
+            try:
+                ctypes.windll.kernel32.LocalFree(sd_ptr)
+            except Exception:
+                pass
 
 
-def _spawn(flag: str, extra_flags: int = 0) -> None:
+def _spawn(flag: str, extra_flags: int = 0) -> Any:
     try:
         if getattr(sys, "frozen", False):
             cmd = [sys.executable, flag]
         else:
             cmd = [sys.executable, os.path.join(RT.PROJECT_ROOT, "main.py"), flag]
-        subprocess.Popen(cmd, creationflags=extra_flags)
+        return subprocess.Popen(cmd, creationflags=extra_flags)
+    except Exception:
+        return None
+
+
+def _log_exc(where: str) -> None:
+    """於無主控台執行時期記錄未預期例外至暫存日誌，避免靜默失敗。"""
+    try:
+        path = os.path.join(tempfile.gettempdir(), "lgfw_app.log")
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {where}\n{traceback.format_exc()}\n")
     except Exception:
         pass
 
 
-def spawn_background_tray() -> None:
+def _focus_existing_settings_window() -> bool:
+    """若控制中心視窗已開啟，將其還原並帶至前景，避免重複開啟多視窗（跨權限封鎖時退回新開）。"""
+    if not RT.IS_WIN or RT.user32 is None:
+        return False
+    found: list[int] = []
+    try:
+        from ctypes import wintypes
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HWND, ctypes.c_void_p)
+        RT.user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        RT.user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        RT.user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        RT.user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        RT.user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        RT.user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+
+        def _cb(hwnd: int, _lp: int) -> int:
+            if not RT.user32.IsWindowVisible(hwnd):
+                return 1
+            length = RT.user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return 1
+            buf = ctypes.create_unicode_buffer(length + 1)
+            RT.user32.GetWindowTextW(hwnd, buf, length + 1)
+            if buf.value.startswith(RT.APP_TITLE):
+                found.append(hwnd)
+                return 0
+            return 1
+
+        RT.user32.EnumWindows(WNDENUMPROC(_cb), 0)
+        if found:
+            hwnd = found[0]
+            if not RT.user32.PostMessageW(hwnd, 0, 0, 0):  # UIPI 阻擋跨權限操作（如一般權限無法喚醒管理員視窗）
+                return False
+            RT.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            RT.user32.SetForegroundWindow(hwnd)
+            return True
+    except Exception:
+        _log_exc("_focus_existing_settings_window")
+    return False
+
+
+def spawn_background_tray() -> Any:
     """於背景無主控台啟動系統匣常駐行程。"""
-    _spawn("--autostart", 0x08000000)
+    return _spawn("--autostart", 0x08000000)
 
 
 def spawn_settings_ui() -> None:
-    """啟動圖形設定視窗行程。"""
-    _spawn("--settings")
+    """啟動或喚起圖形設定視窗行程。"""
+    if not _focus_existing_settings_window():
+        _spawn("--settings")
 
 
 def _webview_storage_path() -> str:
@@ -140,7 +292,17 @@ class LiquidGlassApp:
         self.watcher: Any = None
         self.initial_scope: str = ""
         self._relaunching_admin: bool = False
+        self._tray_proc: Any = None
         self.load_config()
+
+    def _ensure_tray_spawned(self) -> None:
+        """確保背景系統匣常駐已啟動（標準與系統管理員模式皆一體適用）。"""
+        if is_tray_running():
+            return
+        proc = self._tray_proc
+        if proc is not None and getattr(proc, "poll", lambda: 0)() is None:
+            return
+        self._tray_proc = spawn_background_tray()
 
     def get_lifecycle(self) -> dict[str, bool]:
         """取得正規化後的退出還原與關閉視窗策略設定。"""
@@ -269,10 +431,8 @@ class LiquidGlassApp:
                     self.window.show()
                 except Exception:
                     pass
-                if (not RT.is_admin()) and (not is_tray_running()) and (not self.get_lifecycle()["exit_when_window_closes"]):
-                    t_tray = threading.Timer(1.0, spawn_background_tray)
-                    t_tray.daemon = True
-                    t_tray.start()
+                if (not self.get_lifecycle()["exit_when_window_closes"]) and (not is_tray_running()):
+                    self._ensure_tray_spawned()
 
         try:
             self.window.events.loaded += show
@@ -288,11 +448,16 @@ class LiquidGlassApp:
                 webview.start(**start_kw)
             except TypeError:
                 webview.start(gui="edgechromium")
+        except Exception:
+            _log_exc("open_settings_window")
         finally:
             self.handle_window_closed()
+        # 確保 WebView2 / pythonnet 背景執行緒不會把已關閉的視窗卡在無頭殭屍行程狀態。
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            os._exit(0)
 
     def handle_window_closed(self) -> None:
-        """視窗關閉收尾：管理員提權重啟交接期間不動作，否則依生命週期決定停匣／還原即時引擎。"""
+        """視窗關閉收尾：管理員提權重啟交接期間不動作，否則依生命週期縮小常駐通知區或還原引擎。"""
         if self._relaunching_admin:
             return
         self.load_config()
@@ -302,11 +467,18 @@ class LiquidGlassApp:
             if lc["restore_live_on_exit"]:
                 SM.restore_live_scopes_on_exit()
             return
+        proc = getattr(self, "_tray_proc", None)
+        if proc is not None and not is_tray_running():
+            deadline = time.monotonic() + 2.5
+            while time.monotonic() < deadline and not is_tray_running():
+                if getattr(proc, "poll", lambda: 0)() is not None:
+                    break
+                time.sleep(0.05)
         if lc["restore_live_on_exit"] and not is_tray_running():
             SM.restore_live_scopes_on_exit()
 
     def _warm_previews(self, api: Any) -> None:
-        """在背景提前熱載入 NumPy / PIL 並快取預設預覽圖。"""
+        """在背景提前熱載入 NumPy / PIL 並快取核心三區預設預覽圖。"""
         try:
             dpr = 1.0
             if RT.IS_WIN and RT.user32 is not None:
@@ -315,7 +487,8 @@ class LiquidGlassApp:
                 except Exception:
                     pass
             for sc in S.ACTIVE_SCOPES:
-                api._render_preview(sc, S.clamp_params(sc, self.config[sc]), min(3.0, dpr))
+                if not S.SPECS[sc].get("experimental"):
+                    api._render_preview(sc, S.clamp_params(sc, self.config[sc]), min(3.0, dpr))
         except Exception:
             pass
 
@@ -355,7 +528,7 @@ class LiquidGlassApp:
             for sc in S.SCOPES:
                 locked = S.is_scope_locked(sc)
                 need_wh = bool(S.SPECS[sc].get("requires_windhawk")) and not wh_ok
-                suffix = "（🔒 已封鎖）" if locked else ("（🔌 需安裝 Windhawk）" if need_wh else "")
+                suffix = "（🔒 已封鎖）" if locked else ("（🔌 需安裝 Windhawk）" if need_wh else ("（獨立測試）" if S.SPECS[sc].get("experimental") else ""))
                 title = f"{S.SPECS[sc]['icon']} {S.SPECS[sc]['label']}{suffix}"
                 items.append(pystray.MenuItem(title, bg(kind, [sc]), enabled=(not locked and not need_wh)))
             return items
@@ -379,13 +552,15 @@ class LiquidGlassApp:
             pystray.MenuItem("🪟 開啟控制中心", lambda: spawn_settings_ui(), default=True),
             pystray.Menu.SEPARATOR,
             *quick_items,
-            pystray.MenuItem("區域管理", pystray.Menu(*scope_items("apply"))),
+            pystray.MenuItem("區域套用", pystray.Menu(*scope_items("apply"))),
+            pystray.MenuItem("區域還原", pystray.Menu(*scope_items("restore"))),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("📁 開啟母本備份資料夾（唯讀）", lambda: self._open(RT.BACKUP_DIR)),
             *exit_items,
         )
-        _init_tray_stop_event()
-        self.tray = pystray.Icon(RT.APP_NAME, img, RT.APP_TITLE, menu)
+        if not _TRAY_STOP_EVENT:
+            _init_tray_stop_event()
+        self.tray = pystray.Icon(RT.APP_NAME, img, f"{RT.APP_TITLE}（點擊開啟控制中心）", menu)
         self.apply_watcher_config()
         threading.Thread(target=self._config_poll_loop, daemon=True, name="lgfw-config-poll").start()
         self.tray.run()

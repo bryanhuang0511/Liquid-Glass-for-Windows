@@ -50,6 +50,14 @@ MOD_SPECS = {
         "status_filename": "lgic_windhawk_startmenu_status.json",
         "label": "開始功能表",
     },
+    "tray": {
+        "mod_id": "local@liquid-glass-tray-icons",
+        "version": "1.0.0",
+        "source_rel": ("windhawk", "liquid_glass_tray.wh.cpp"),
+        "include": "explorer.exe",
+        "status_filename": "lgic_windhawk_tray_status.json",
+        "label": "通知列",
+    },
 }
 
 
@@ -344,7 +352,7 @@ def read_mod_ini(ini_path):
     }
 
 
-def _mod_payload(spec, dll_filename, source_hash, params, enabled=True, scope="taskbar"):
+def _mod_payload(spec, dll_filename, source_hash, params, enabled=True, scope="taskbar", whitelist=None):
     p = S.clamp_params(scope, params)
     now_ts = int(time.time())
     mod_fields = {
@@ -364,12 +372,19 @@ def _mod_payload(spec, dll_filename, source_hash, params, enabled=True, scope="t
         "Glow": int(round(p["glow"] * 100)),
         "DarkProtect": int(round(p["dark_protect"] * 100)),
     }
+    if scope == "tray":
+        raw_wl = whitelist
+        if raw_wl is None and isinstance(params, dict) and "whitelist_apps" in params:
+            raw_wl = params.get("whitelist_apps")
+        setting_fields["WhitelistApps"] = S.normalize_tray_whitelist(raw_wl)
     return mod_fields, setting_fields
 
 
-def write_mod_ini(ini_path, dll_filename, source_hash, params, enabled=True, scope="taskbar"):
+def write_mod_ini(ini_path, dll_filename, source_hash, params, enabled=True, scope="taskbar", whitelist=None):
     spec = _spec(scope)
-    mod_fields, setting_fields = _mod_payload(spec, dll_filename, source_hash, params, enabled=enabled, scope=scope)
+    mod_fields, setting_fields = _mod_payload(
+        spec, dll_filename, source_hash, params, enabled=enabled, scope=scope, whitelist=whitelist
+    )
     os.makedirs(os.path.dirname(ini_path), exist_ok=True)
     lines = ["[Mod]"]
     lines.extend(f"{k}={v}" for k, v in mod_fields.items())
@@ -426,12 +441,14 @@ def _read_mod_registry(paths, scope="taskbar"):
     return {"exists": True, "mod": mod_vals, "settings": set_vals}
 
 
-def _write_mod_registry(paths, dll_filename, source_hash, params, enabled=True, scope="taskbar"):
+def _write_mod_registry(paths, dll_filename, source_hash, params, enabled=True, scope="taskbar", whitelist=None):
     hive, base_sub = _parse_registry_root(paths.get("registry_key"))
     if hive is None:
         raise OSError("invalid Windhawk RegistryKey")
     spec = _spec(scope)
-    mod_fields, setting_fields = _mod_payload(spec, dll_filename, source_hash, params, enabled=enabled, scope=scope)
+    mod_fields, setting_fields = _mod_payload(
+        spec, dll_filename, source_hash, params, enabled=enabled, scope=scope, whitelist=whitelist
+    )
     mod_key = f"{base_sub}\\Engine\\Mods\\{spec['mod_id']}"
     set_key = f"{mod_key}\\Settings"
     access = winreg.KEY_WRITE | winreg.KEY_READ
@@ -443,7 +460,10 @@ def _write_mod_registry(paths, dll_filename, source_hash, params, enabled=True, 
                 winreg.SetValueEx(mk, k, 0, winreg.REG_SZ, v)
     with winreg.CreateKeyEx(hive, set_key, 0, access) as sk:
         for k, v in setting_fields.items():
-            winreg.SetValueEx(sk, k, 0, winreg.REG_DWORD, int(v) & 0xFFFFFFFF)
+            if isinstance(v, int):
+                winreg.SetValueEx(sk, k, 0, winreg.REG_DWORD, int(v) & 0xFFFFFFFF)
+            else:
+                winreg.SetValueEx(sk, k, 0, winreg.REG_SZ, str(v))
 
 
 def read_mod_config(paths, scope="taskbar"):
@@ -452,10 +472,14 @@ def read_mod_config(paths, scope="taskbar"):
     return read_mod_ini(paths["ini_path"])
 
 
-def write_mod_config(paths, dll_filename, source_hash, params, enabled=True, scope="taskbar"):
+def write_mod_config(paths, dll_filename, source_hash, params, enabled=True, scope="taskbar", whitelist=None):
     if paths.get("storage_mode") == "registry":
-        return _write_mod_registry(paths, dll_filename, source_hash, params, enabled=enabled, scope=scope)
-    return write_mod_ini(paths["ini_path"], dll_filename, source_hash, params, enabled=enabled, scope=scope)
+        return _write_mod_registry(
+            paths, dll_filename, source_hash, params, enabled=enabled, scope=scope, whitelist=whitelist
+        )
+    return write_mod_ini(
+        paths["ini_path"], dll_filename, source_hash, params, enabled=enabled, scope=scope, whitelist=whitelist
+    )
 
 
 def compile_mod(paths, cpp_path, scope="taskbar"):
@@ -599,7 +623,7 @@ def _cleanup_stale_mod_dlls(paths, scope, keep_dll):
     return removed
 
 
-def apply_windhawk_mod(scope, params, wh_dir=None, base_dir=None):
+def apply_windhawk_mod(scope, params, wh_dir=None, base_dir=None, whitelist=None):
     spec = _spec(scope)
     paths = resolve_windhawk_paths(wh_dir, scope=scope)
     if not os.path.exists(paths["exe"]):
@@ -618,13 +642,23 @@ def apply_windhawk_mod(scope, params, wh_dir=None, base_dir=None):
     prev_ini = read_mod_config(paths, scope=scope)
     prev_enabled = prev_ini["exists"] and str(prev_ini["mod"].get("Disabled", "1")).strip() == "0"
     prev_dll = prev_ini["mod"].get("LibraryFileName", "")
+    wl = whitelist
+    if wl is None and scope == "tray" and not (isinstance(params, dict) and "whitelist_apps" in params):
+        if prev_ini["exists"] and "WhitelistApps" in prev_ini["settings"]:
+            wl = prev_ini["settings"]["WhitelistApps"]
     try:
         if prev_enabled and prev_dll and prev_dll != comp["dll_name"]:
             # 若先前版本的 DLL 仍載入中，先短暫停用卸載再載入新版 DLL
-            write_mod_config(paths, prev_dll, prev_ini["mod"].get("SourceHash", ""), params, enabled=False, scope=scope)
+            write_mod_config(
+                paths, prev_dll, prev_ini["mod"].get("SourceHash", ""), params,
+                enabled=False, scope=scope, whitelist=wl,
+            )
             time.sleep(0.5)
 
-        write_mod_config(paths, comp["dll_name"], comp["source_hash"], params, enabled=True, scope=scope)
+        write_mod_config(
+            paths, comp["dll_name"], comp["source_hash"], params,
+            enabled=True, scope=scope, whitelist=wl,
+        )
     except OSError as exc:
         if _is_access_denied(exc):
             return {"ok": False, "needs_admin": True,
@@ -648,7 +682,11 @@ def apply_startmenu(params, wh_dir=None, base_dir=None):
     return apply_windhawk_mod("startmenu", params, wh_dir=wh_dir, base_dir=base_dir)
 
 
-def update_settings_if_active(params, wh_dir=None, scope="taskbar"):
+def apply_tray(params, wh_dir=None, base_dir=None, whitelist=None):
+    return apply_windhawk_mod("tray", params, wh_dir=wh_dir, base_dir=base_dir, whitelist=whitelist)
+
+
+def update_settings_if_active(params, wh_dir=None, scope="taskbar", whitelist=None):
     paths = resolve_windhawk_paths(wh_dir, scope=scope)
     ini = read_mod_config(paths, scope=scope)
     if not ini["exists"] or str(ini["mod"].get("Disabled", "1")).strip() != "0":
@@ -657,8 +695,12 @@ def update_settings_if_active(params, wh_dir=None, scope="taskbar"):
     if not dll_name:
         return {"ok": False, "synced": False}
     src_hash = ini["mod"].get("SourceHash", "")
+    wl = whitelist
+    if wl is None and scope == "tray" and not (isinstance(params, dict) and "whitelist_apps" in params):
+        if "WhitelistApps" in ini["settings"]:
+            wl = ini["settings"]["WhitelistApps"]
     try:
-        write_mod_config(paths, dll_name, src_hash, params, enabled=True, scope=scope)
+        write_mod_config(paths, dll_name, src_hash, params, enabled=True, scope=scope, whitelist=wl)
     except OSError as exc:
         if _is_access_denied(exc):
             return {"ok": False, "synced": False, "needs_admin": True}
@@ -674,6 +716,7 @@ def restore_windhawk_mod(scope, params=None, wh_dir=None):
         return {"ok": True, "message": f"{spec['label']}模組尚未啟用，原生圖示維持不變"}
     dll_name = ini["mod"].get("LibraryFileName", "")
     src_hash = ini["mod"].get("SourceHash", "")
+    wl = ini["settings"].get("WhitelistApps") if (scope == "tray" and "WhitelistApps" in ini["settings"]) else None
     try:
         write_mod_config(
             paths,
@@ -682,6 +725,7 @@ def restore_windhawk_mod(scope, params=None, wh_dir=None):
             params or S.default_params(scope),
             enabled=False,
             scope=scope,
+            whitelist=wl,
         )
     except OSError as exc:
         if _is_access_denied(exc):
@@ -697,3 +741,7 @@ def restore_taskbar(params=None, wh_dir=None):
 
 def restore_startmenu(params=None, wh_dir=None):
     return restore_windhawk_mod("startmenu", params=params, wh_dir=wh_dir)
+
+
+def restore_tray(params=None, wh_dir=None):
+    return restore_windhawk_mod("tray", params=params, wh_dir=wh_dir)
