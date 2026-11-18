@@ -12,8 +12,10 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import traceback
 from typing import Any
 
 from liquid_glass import desktop_watcher as DW
@@ -211,13 +213,31 @@ def _spawn(flag: str, extra_flags: int = 0) -> Any:
         return None
 
 
+def _log_exc(where: str) -> None:
+    """於無主控台執行時期記錄未預期例外至暫存日誌，避免靜默失敗。"""
+    try:
+        path = os.path.join(tempfile.gettempdir(), "lgfw_app.log")
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {where}\n{traceback.format_exc()}\n")
+    except Exception:
+        pass
+
+
 def _focus_existing_settings_window() -> bool:
-    """若控制中心視窗已開啟，將其還原並帶至前景，避免重複開啟多視窗。"""
+    """若控制中心視窗已開啟，將其還原並帶至前景，避免重複開啟多視窗（跨權限封鎖時退回新開）。"""
     if not RT.IS_WIN or RT.user32 is None:
         return False
     found: list[int] = []
     try:
-        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+        from ctypes import wintypes
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HWND, ctypes.c_void_p)
+        RT.user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        RT.user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        RT.user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        RT.user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        RT.user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        RT.user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 
         def _cb(hwnd: int, _lp: int) -> int:
             if not RT.user32.IsWindowVisible(hwnd):
@@ -235,11 +255,13 @@ def _focus_existing_settings_window() -> bool:
         RT.user32.EnumWindows(WNDENUMPROC(_cb), 0)
         if found:
             hwnd = found[0]
+            if not RT.user32.PostMessageW(hwnd, 0, 0, 0):  # UIPI 阻擋跨權限操作（如一般權限無法喚醒管理員視窗）
+                return False
             RT.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
             RT.user32.SetForegroundWindow(hwnd)
             return True
     except Exception:
-        pass
+        _log_exc("_focus_existing_settings_window")
     return False
 
 
@@ -426,8 +448,13 @@ class LiquidGlassApp:
                 webview.start(**start_kw)
             except TypeError:
                 webview.start(gui="edgechromium")
+        except Exception:
+            _log_exc("open_settings_window")
         finally:
             self.handle_window_closed()
+        # 確保 WebView2 / pythonnet 背景執行緒不會把已關閉的視窗卡在無頭殭屍行程狀態。
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            os._exit(0)
 
     def handle_window_closed(self) -> None:
         """視窗關閉收尾：管理員提權重啟交接期間不動作，否則依生命週期縮小常駐通知區或還原引擎。"""

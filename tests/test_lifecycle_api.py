@@ -201,6 +201,18 @@ def test_api_relaunch_admin_wiztree_banner(env, monkeypatch):
     assert env.main.main(["--settings", "--scope", "desktop"]) == 0
     assert seen == ["desktop"]
 
+    if RT.IS_WIN and RT.user32 is not None:
+        monkeypatch.setattr(RT.user32, "IsWindowVisible", lambda _h: 1)
+        monkeypatch.setattr(RT.user32, "GetWindowTextLengthW", lambda _h: len(RT.APP_TITLE))
+        monkeypatch.setattr(RT.user32, "GetWindowTextW", lambda _h, b, _n: b.__setitem__(slice(0, len(RT.APP_TITLE)), RT.APP_TITLE))
+        monkeypatch.setattr(RT.user32, "EnumWindows", lambda cb, lp: cb(12345, lp) or 1)
+        monkeypatch.setattr(RT.user32, "PostMessageW", lambda *_a: 0)
+        assert TC._focus_existing_settings_window() is False
+        monkeypatch.setattr(RT.user32, "PostMessageW", lambda *_a: 1)
+        monkeypatch.setattr(RT.user32, "ShowWindow", lambda *_a: 1)
+        monkeypatch.setattr(RT.user32, "SetForegroundWindow", lambda *_a: 1)
+        assert TC._focus_existing_settings_window() is True
+
 
 def test_ui_html_has_wiztree_non_blocking_banner(env):
     with open(RT.UI_HTML_PATH, "r", encoding="utf-8") as handle:

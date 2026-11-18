@@ -162,6 +162,12 @@ std::unordered_map<void*, TrayImgRecord> g_imgMap;
 std::list<CacheEntry> g_lruList;
 std::unordered_map<CacheKey, std::list<CacheEntry>::iterator, CacheKeyHash> g_lruMap;
 size_t g_lruTotalBytes = 0;
+winrt::weak_ref<wux::FrameworkElement> g_trayFrameWeak;
+winrt::weak_ref<wux::FrameworkElement> g_overflowWeak;
+std::atomic<uint64_t> g_lastTraySweepTick{0};
+std::atomic<uint32_t> g_lastTraySweepGen{0};
+std::atomic<uint64_t> g_lastOverflowSweepTick{0};
+std::atomic<uint32_t> g_lastOverflowSweepGen{0};
 
 std::mutex g_keepMutex;
 std::vector<std::shared_ptr<PendingRtbOp>> g_keepRtbOps;
@@ -173,10 +179,19 @@ std::atomic<uint64_t> g_cacheHits{0};
 std::atomic<uint64_t> g_lowResCount{0};
 std::atomic<uint64_t> g_errorCount{0};
 std::atomic<uint64_t> g_measureCalls{0};
+std::atomic<uint64_t> g_arrangeCalls{0};
+std::atomic<uint64_t> g_overflowCalls{0};
+std::atomic<uint64_t> g_nudgeCalls{0};
 std::atomic<uint64_t> g_vmPutCalls{0};
 std::atomic<uint64_t> g_rtbQueued{0};
 std::atomic<uint64_t> g_rtbOk{0};
 std::atomic<uint64_t> g_rtbFail{0};
+std::atomic<uint64_t> g_xamlRootCalls{0};
+std::atomic<uint64_t> g_ovInitCalls{0};
+std::atomic<uint64_t> g_ovShowCalls{0};
+std::atomic<uint64_t> g_ovUpdateCalls{0};
+std::atomic<bool> g_systemTrayFound{false};
+std::atomic<bool> g_overflowFound{false};
 std::atomic<uint64_t> g_lastStatusFlushTick{0};
 std::wstring g_statusPath;
 std::mutex g_statusMutex;
@@ -184,10 +199,26 @@ std::mutex g_statusMutex;
 thread_local bool t_inOurSourceOverride = false;
 
 using MeasureOverride_t = int32_t(WINAPI*)(void* pThis, uint64_t availSizeBits, void* pReturnSize);
+using OnApplyTemplate_t = int32_t(WINAPI*)(void* pThis);
 using PutIconImageSource_t = int32_t(WINAPI*)(void* pThis, void* value);
+using SimpleThisProc_t = void(WINAPI*)(void* pThis);
+using OverflowManagerShow_t = void(WINAPI*)(void* pThis, POINT pt, int32_t inputDeviceKind);
+using CTaskBand_GetTaskbarHost_t = void*(WINAPI*)(void* pThis, void** result);
 
+MeasureOverride_t SystemTrayFrame_ArrangeOverride_Original = nullptr;
+MeasureOverride_t Overflow_ArrangeOverride_Original = nullptr;
+OnApplyTemplate_t Overflow_OnApplyTemplate_Original = nullptr;
 MeasureOverride_t ImageIconContent_MeasureOverride_Original = nullptr;
+MeasureOverride_t TaskbarFrame_MeasureOverride_Original = nullptr;
 PutIconImageSource_t ImageIconVM_put_IconImageSource_Original = nullptr;
+SimpleThisProc_t OverflowManager_InitializeIfNeeded_Original = nullptr;
+OverflowManagerShow_t OverflowManager_Show_Original = nullptr;
+SimpleThisProc_t SystemTrayController_UpdateOverflowIcons_Original = nullptr;
+
+void* CTaskBand_ITaskListWndSite_vftable = nullptr;
+CTaskBand_GetTaskbarHost_t CTaskBand_GetTaskbarHost_Original = nullptr;
+void* TaskbarHost_FrameHeight_Original = nullptr;
+SimpleThisProc_t std__Ref_count_base__Decref_Original = nullptr;
 
 // ---------------------------------------------------------------------------
 // Utility, Hashing & Telemetry
@@ -258,14 +289,17 @@ void FlushStatusFile(bool force) {
         snap = g_settings;
     }
 
-    char json[640];
+    char json[1024];
     int len = _snprintf_s(
         json, sizeof(json), _TRUNCATE,
         "{\"active\":%s,\"unloading\":%s,\"pid\":%lu,\"generation\":%u,"
         "\"tracked_buttons\":%zu,\"cache_entries\":%zu,\"cache_bytes\":%zu,"
         "\"max_cache_entries\":%zu,\"max_cache_bytes\":%zu,"
         "\"render_count\":%llu,\"cache_hits\":%llu,\"low_res_count\":%llu,\"error_count\":%llu,"
-        "\"measure_calls\":%llu,\"vm_put_calls\":%llu,\"rtb_queued\":%llu,\"rtb_ok\":%llu,\"rtb_fail\":%llu,"
+        "\"measure_calls\":%llu,\"arrange_calls\":%llu,\"overflow_calls\":%llu,\"nudge_calls\":%llu,"
+        "\"vm_put_calls\":%llu,\"rtb_queued\":%llu,\"rtb_ok\":%llu,\"rtb_fail\":%llu,"
+        "\"xaml_root_calls\":%llu,\"overflow_init_calls\":%llu,\"overflow_show_calls\":%llu,\"overflow_update_calls\":%llu,"
+        "\"system_tray_found\":%s,\"overflow_found\":%s,"
         "\"pending_async\":%d,\"hook_ok\":%s,"
         "\"opacity\":%d,\"frost\":%d,\"glow\":%d,\"dark_protect\":%d}",
         (snap.enabled && !g_unloading.load()) ? "true" : "false",
@@ -279,10 +313,19 @@ void FlushStatusFile(bool force) {
         static_cast<unsigned long long>(g_lowResCount.load()),
         static_cast<unsigned long long>(g_errorCount.load()),
         static_cast<unsigned long long>(g_measureCalls.load()),
+        static_cast<unsigned long long>(g_arrangeCalls.load()),
+        static_cast<unsigned long long>(g_overflowCalls.load()),
+        static_cast<unsigned long long>(g_nudgeCalls.load()),
         static_cast<unsigned long long>(g_vmPutCalls.load()),
         static_cast<unsigned long long>(g_rtbQueued.load()),
         static_cast<unsigned long long>(g_rtbOk.load()),
         static_cast<unsigned long long>(g_rtbFail.load()),
+        static_cast<unsigned long long>(g_xamlRootCalls.load()),
+        static_cast<unsigned long long>(g_ovInitCalls.load()),
+        static_cast<unsigned long long>(g_ovShowCalls.load()),
+        static_cast<unsigned long long>(g_ovUpdateCalls.load()),
+        g_systemTrayFound.load() ? "true" : "false",
+        g_overflowFound.load() ? "true" : "false",
         g_pendingAsyncOps.load(),
         g_hookInstalled.load() ? "true" : "false",
         snap.opacityPct, snap.frostPct, snap.glowPct, snap.darkProtectPct);
@@ -1379,8 +1422,425 @@ void ReapplyOrRestoreAllDispatchers(bool restoreOnly, bool waitForCompletion) {
 }
 
 // ---------------------------------------------------------------------------
-// SystemTray.dll Symbol Hooks (Zero Conflict With Spacing / On-Top Mods)
+// Visual Tree Walk & SystemTray.dll Symbol Hooks
 // ---------------------------------------------------------------------------
+
+void WalkTraySubtree(const wux::DependencyObject& node, int depth = 0) {
+    if (!node || depth > 24 || g_unloading.load()) return;
+    try {
+        auto cls = winrt::get_class_name(node);
+        if (cls == L"SystemTray.NotifyIconView") {
+            if (auto img = FindChildImage(node, 10)) {
+                ProcessImageOnUiThread(img, true);
+            }
+            return;
+        }
+        int count = wuxm::VisualTreeHelper::GetChildrenCount(node);
+        for (int i = 0; i < count; ++i) {
+            if (auto child = wuxm::VisualTreeHelper::GetChild(node, i)) {
+                WalkTraySubtree(child, depth + 1);
+            }
+        }
+    } catch (...) {
+    }
+}
+
+wux::FrameworkElement FindVisualChildByClassName(const wux::DependencyObject& node,
+                                                 const wchar_t* targetCls,
+                                                 int maxDepth) {
+    if (!node || maxDepth <= 0 || g_unloading.load()) return nullptr;
+    try {
+        if (winrt::get_class_name(node) == targetCls) {
+            return node.try_as<wux::FrameworkElement>();
+        }
+        int count = wuxm::VisualTreeHelper::GetChildrenCount(node);
+        for (int i = 0; i < count; ++i) {
+            if (auto child = wuxm::VisualTreeHelper::GetChild(node, i)) {
+                if (auto found = FindVisualChildByClassName(child, targetCls, maxDepth - 1)) {
+                    return found;
+                }
+            }
+        }
+    } catch (...) {
+    }
+    return nullptr;
+}
+
+wux::FrameworkElement FindSystemTrayFrameInTaskbar(const wux::FrameworkElement& rootFe) {
+    if (!rootFe) return nullptr;
+    try {
+        if (winrt::get_class_name(rootFe) == L"SystemTray.SystemTrayFrame") {
+            return rootFe;
+        }
+        if (auto rep = rootFe.FindName(L"TaskbarFrameRepeater").try_as<wux::DependencyObject>()) {
+            int count = wuxm::VisualTreeHelper::GetChildrenCount(rep);
+            for (int i = 0; i < count; ++i) {
+                auto item = wuxm::VisualTreeHelper::GetChild(rep, i);
+                if (!item || winrt::get_class_name(item) != L"Taskbar.TaskbarExtensionElement") continue;
+                if (auto cc = item.try_as<wuxc::ContentControl>()) {
+                    if (auto content = cc.Content().try_as<wux::FrameworkElement>()) {
+                        if (winrt::get_class_name(content) == L"SystemTray.SystemTrayFrame") {
+                            return content;
+                        }
+                    }
+                }
+            }
+        }
+        if (auto fallback = FindVisualChildByClassName(rootFe, L"SystemTray.SystemTrayFrame", 10)) {
+            return fallback;
+        }
+    } catch (...) {
+    }
+    return nullptr;
+}
+
+bool IsReadableMemory(const void* ptr, size_t bytes) noexcept {
+    if (!ptr || bytes == 0) return false;
+    uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
+    if (start < 0x10000ULL) return false;
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery(ptr, &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
+    if (mbi.State != MEM_COMMIT) return false;
+    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
+    constexpr DWORD kReadMask = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
+                                PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    if ((mbi.Protect & kReadMask) == 0) return false;
+    uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    return start <= regionEnd && (regionEnd - start) >= bytes;
+}
+
+wux::XamlRoot GetTaskbarXamlRoot(HWND hTaskbarWnd) {
+    if (!hTaskbarWnd || !CTaskBand_ITaskListWndSite_vftable ||
+        !CTaskBand_GetTaskbarHost_Original || !TaskbarHost_FrameHeight_Original ||
+        !std__Ref_count_base__Decref_Original) {
+        return nullptr;
+    }
+    HWND hTaskSwWnd = reinterpret_cast<HWND>(GetPropW(hTaskbarWnd, L"TaskbandHWND"));
+    if (!hTaskSwWnd) return nullptr;
+
+    void* taskBand = reinterpret_cast<void*>(GetWindowLongPtrW(hTaskSwWnd, 0));
+    if (!taskBand) return nullptr;
+
+    void* taskBandForSite = taskBand;
+    bool foundSite = false;
+    for (int i = 0; i < 20; ++i) {
+        if (!IsReadableMemory(taskBandForSite, sizeof(void*))) return nullptr;
+        if (*reinterpret_cast<void**>(taskBandForSite) == CTaskBand_ITaskListWndSite_vftable) {
+            foundSite = true;
+            break;
+        }
+        taskBandForSite = reinterpret_cast<void**>(taskBandForSite) + 1;
+    }
+    if (!foundSite) return nullptr;
+
+    void* taskbarHostSharedPtr[2]{};
+    CTaskBand_GetTaskbarHost_Original(taskBandForSite, taskbarHostSharedPtr);
+    if (!taskbarHostSharedPtr[0]) {
+        if (taskbarHostSharedPtr[1]) {
+            std__Ref_count_base__Decref_Original(taskbarHostSharedPtr[1]);
+        }
+        return nullptr;
+    }
+
+    size_t elemOffset = 0x10;
+#if defined(_M_X64) || defined(__x86_64__)
+    if (IsReadableMemory(TaskbarHost_FrameHeight_Original, 8)) {
+        const BYTE* b = reinterpret_cast<const BYTE*>(TaskbarHost_FrameHeight_Original);
+        if (b[0] == 0x48 && b[1] == 0x83 && b[2] == 0xEC && b[4] == 0x48 &&
+            b[5] == 0x83 && b[6] == 0xC1 && b[7] <= 0x7F) {
+            elemOffset = b[7];
+        }
+    }
+#endif
+
+    wux::XamlRoot result{nullptr};
+    const uint8_t* elemSlot = reinterpret_cast<const uint8_t*>(taskbarHostSharedPtr[0]) + elemOffset;
+    if (IsReadableMemory(elemSlot, sizeof(void*))) {
+        IUnknown* elemUnk = *reinterpret_cast<IUnknown* const*>(elemSlot);
+        if (IsReadableMemory(elemUnk, sizeof(void*)) &&
+            IsReadableMemory(*reinterpret_cast<void* const*>(elemUnk), 4 * sizeof(void*))) {
+            try {
+                wux::FrameworkElement taskbarElement{nullptr};
+                if (SUCCEEDED(elemUnk->QueryInterface(winrt::guid_of<wux::FrameworkElement>(),
+                                                      winrt::put_abi(taskbarElement))) &&
+                    taskbarElement) {
+                    result = taskbarElement.XamlRoot();
+                    g_xamlRootCalls.fetch_add(1, std::memory_order_relaxed);
+                }
+            } catch (...) {
+            }
+        }
+    }
+
+    if (taskbarHostSharedPtr[1]) {
+        std__Ref_count_base__Decref_Original(taskbarHostSharedPtr[1]);
+    }
+    return result;
+}
+
+using RunFromWindowThreadProc_t = void(WINAPI*)(void* parameter);
+
+bool RunFromWindowThread(HWND hWnd, RunFromWindowThreadProc_t proc, void* procParam) {
+    static const UINT s_msg = RegisterWindowMessageW(L"LiquidGlassTray_RunFromWindowThread");
+    struct Param {
+        RunFromWindowThreadProc_t proc;
+        void* procParam;
+    };
+    DWORD dwThreadId = GetWindowThreadProcessId(hWnd, nullptr);
+    if (dwThreadId == 0) return false;
+    if (dwThreadId == GetCurrentThreadId()) {
+        proc(procParam);
+        return true;
+    }
+    HHOOK hook = SetWindowsHookExW(
+        WH_CALLWNDPROC,
+        [](int nCode, WPARAM wParam, LPARAM lParam) -> LRESULT {
+            if (nCode == HC_ACTION) {
+                const CWPSTRUCT* cwp = reinterpret_cast<const CWPSTRUCT*>(lParam);
+                if (cwp && cwp->message == s_msg && cwp->lParam) {
+                    auto* p = reinterpret_cast<Param*>(cwp->lParam);
+                    p->proc(p->procParam);
+                }
+            }
+            return CallNextHookEx(nullptr, nCode, wParam, lParam);
+        },
+        nullptr, dwThreadId);
+    if (!hook) return false;
+    Param param{proc, procParam};
+    SendMessageTimeoutW(hWnd, s_msg, 0, reinterpret_cast<LPARAM>(&param), SMTO_ABORTIFHUNG, 800, nullptr);
+    UnhookWindowsHookEx(hook);
+    return true;
+}
+
+std::vector<HWND> EnumCurrentProcessTaskbarWindows() {
+    std::vector<HWND> out;
+    struct Ctx {
+        DWORD pid;
+        std::vector<HWND>* list;
+    } ctx{GetCurrentProcessId(), &out};
+    EnumWindows(
+        [](HWND hWnd, LPARAM lp) -> BOOL {
+            auto* c = reinterpret_cast<Ctx*>(lp);
+            DWORD pid = 0;
+            if (!GetWindowThreadProcessId(hWnd, &pid) || pid != c->pid) return TRUE;
+            WCHAR cls[48]{};
+            if (GetClassNameW(hWnd, cls, ARRAYSIZE(cls)) > 0) {
+                if (_wcsicmp(cls, L"Shell_TrayWnd") == 0) c->list->insert(c->list->begin(), hWnd);
+                else if (_wcsicmp(cls, L"Shell_SecondaryTrayWnd") == 0) c->list->push_back(hWnd);
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&ctx));
+    return out;
+}
+
+void NudgeTaskbarLayoutIfCold() {
+    auto hwnds = EnumCurrentProcessTaskbarWindows();
+    if (hwnds.empty()) return;
+    g_nudgeCalls.fetch_add(1, std::memory_order_relaxed);
+#ifndef SPI_SETLOGICALDPIOVERRIDE
+#define SPI_SETLOGICALDPIOVERRIDE 0x009F
+#endif
+    for (HWND hwnd : hwnds) {
+        SendMessageTimeoutW(hwnd, WM_SETTINGCHANGE, SPI_SETLOGICALDPIOVERRIDE, 0, SMTO_ABORTIFHUNG, 500, nullptr);
+        SendMessageTimeoutW(hwnd, WM_SETTINGCHANGE, 0, reinterpret_cast<LPARAM>(L"TraySettings"), SMTO_ABORTIFHUNG, 500, nullptr);
+    }
+}
+
+void DispatchWalkContainer(winrt::weak_ref<wux::FrameworkElement>& weakRoot, bool lowPriority = false) {
+    auto fe = weakRoot.get();
+    if (!fe || g_unloading.load()) return;
+    try {
+        if (auto disp = fe.Dispatcher()) {
+            auto prio = lowPriority ? wuc::CoreDispatcherPriority::Low : wuc::CoreDispatcherPriority::Normal;
+            disp.RunAsync(prio, [weakRoot]() {
+                if (g_unloading.load()) return;
+                if (auto live = weakRoot.get()) {
+                    WalkTraySubtree(live);
+                    FlushStatusFile(true);
+                }
+            });
+        }
+    } catch (...) {
+    }
+}
+
+void SweepTaskbarColdStart() {
+    if (g_unloading.load()) return;
+    auto hwnds = EnumCurrentProcessTaskbarWindows();
+    bool anyFound = false;
+    for (HWND hTaskbarWnd : hwnds) {
+        struct SweepParam {
+            HWND hWnd;
+            bool found;
+        } param{hTaskbarWnd, false};
+        RunFromWindowThread(
+            hTaskbarWnd,
+            [](void* lp) {
+                if (g_unloading.load()) return;
+                auto* sp = reinterpret_cast<SweepParam*>(lp);
+                auto xamlRoot = GetTaskbarXamlRoot(sp->hWnd);
+                if (!xamlRoot) return;
+                try {
+                    if (auto rootFe = xamlRoot.Content().try_as<wux::FrameworkElement>()) {
+                        if (auto stFrame = FindSystemTrayFrameInTaskbar(rootFe)) {
+                            g_trayFrameWeak = winrt::make_weak(stFrame);
+                            g_systemTrayFound.store(true, std::memory_order_release);
+                            uint32_t curGen = g_settingsGeneration.load(std::memory_order_acquire);
+                            g_lastTraySweepGen.store(curGen, std::memory_order_release);
+                            g_lastTraySweepTick.store(GetTickCount64(), std::memory_order_relaxed);
+                            WalkTraySubtree(stFrame);
+                            sp->found = true;
+                        }
+                    }
+                } catch (...) {
+                }
+            },
+            &param);
+        if (param.found) anyFound = true;
+    }
+    if (!anyFound && !g_systemTrayFound.load()) {
+        NudgeTaskbarLayoutIfCold();
+    }
+}
+
+void TryExtractOverflowRootGridFromManager(void* pManager) {
+    if (g_unloading.load() || !pManager) return;
+    if (!IsReadableMemory(pManager, 6 * sizeof(void*))) return;
+    void* raw = reinterpret_cast<void* const*>(pManager)[5];
+    if (!IsReadableMemory(raw, sizeof(void*))) return;
+    void* vtbl = *reinterpret_cast<void* const*>(raw);
+    if (!IsReadableMemory(vtbl, 4 * sizeof(void*))) return;
+    try {
+        wux::FrameworkElement fe{nullptr};
+        if (SUCCEEDED(reinterpret_cast<IUnknown*>(raw)->QueryInterface(
+                winrt::guid_of<wuxc::Grid>(), winrt::put_abi(fe))) &&
+            fe && fe.IsLoaded()) {
+            g_overflowWeak = winrt::make_weak(fe);
+            g_overflowFound.store(true, std::memory_order_release);
+        }
+    } catch (...) {
+    }
+}
+
+void SweepContainerOnArrange(void* pThis,
+                             winrt::weak_ref<wux::FrameworkElement>& storeWeak,
+                             std::atomic<uint64_t>& lastTick,
+                             std::atomic<uint32_t>& lastGen,
+                             uint64_t minIntervalMs,
+                             std::atomic<bool>* foundFlag) {
+    if (g_unloading.load() || !pThis) return;
+    try {
+        wux::FrameworkElement fe{nullptr};
+        if (FAILED(reinterpret_cast<IUnknown*>(pThis)->QueryInterface(
+                winrt::guid_of<wux::FrameworkElement>(), winrt::put_abi(fe))) || !fe) {
+            return;
+        }
+        storeWeak = winrt::make_weak(fe);
+        if (foundFlag) foundFlag->store(true, std::memory_order_release);
+        uint32_t curGen = g_settingsGeneration.load(std::memory_order_acquire);
+        uint64_t now = GetTickCount64();
+        if (lastGen.load(std::memory_order_acquire) == curGen &&
+            (now - lastTick.load(std::memory_order_relaxed)) < minIntervalMs) {
+            return;
+        }
+        lastGen.store(curGen, std::memory_order_release);
+        lastTick.store(now, std::memory_order_relaxed);
+        WalkTraySubtree(fe);
+        FlushStatusFile(false);
+    } catch (...) {
+    }
+}
+
+int32_t WINAPI SystemTrayFrame_ArrangeOverride_Hook(void* pThis, uint64_t finalSizeBits, void* pReturnSize) {
+    int32_t hr = SystemTrayFrame_ArrangeOverride_Original(pThis, finalSizeBits, pReturnSize);
+    g_arrangeCalls.fetch_add(1, std::memory_order_relaxed);
+    SweepContainerOnArrange(pThis, g_trayFrameWeak, g_lastTraySweepTick, g_lastTraySweepGen, 250, &g_systemTrayFound);
+    return hr;
+}
+
+int32_t WINAPI Overflow_ArrangeOverride_Hook(void* pThis, uint64_t finalSizeBits, void* pReturnSize) {
+    int32_t hr = Overflow_ArrangeOverride_Original(pThis, finalSizeBits, pReturnSize);
+    g_overflowCalls.fetch_add(1, std::memory_order_relaxed);
+    SweepContainerOnArrange(pThis, g_overflowWeak, g_lastOverflowSweepTick, g_lastOverflowSweepGen, 80, &g_overflowFound);
+    return hr;
+}
+
+int32_t WINAPI Overflow_OnApplyTemplate_Hook(void* pThis) {
+    int32_t hr = Overflow_OnApplyTemplate_Original(pThis);
+    if (g_unloading.load() || !pThis) return hr;
+    try {
+        wux::FrameworkElement fe{nullptr};
+        if (SUCCEEDED(reinterpret_cast<IUnknown*>(pThis)->QueryInterface(
+                winrt::guid_of<wux::FrameworkElement>(), winrt::put_abi(fe))) && fe) {
+            g_overflowWeak = winrt::make_weak(fe);
+            g_overflowFound.store(true, std::memory_order_release);
+            DispatchWalkContainer(g_overflowWeak, true);
+        }
+    } catch (...) {
+    }
+    return hr;
+}
+
+void WINAPI OverflowManager_InitializeIfNeeded_Hook(void* pThis) {
+    OverflowManager_InitializeIfNeeded_Original(pThis);
+    g_ovInitCalls.fetch_add(1, std::memory_order_relaxed);
+    if (g_unloading.load()) return;
+    if (!g_overflowWeak.get()) {
+        TryExtractOverflowRootGridFromManager(pThis);
+    }
+    if (g_overflowWeak.get()) {
+        DispatchWalkContainer(g_overflowWeak, true);
+    }
+    FlushStatusFile(false);
+}
+
+void WINAPI OverflowManager_Show_Hook(void* pThis, POINT pt, int32_t inputDeviceKind) {
+    OverflowManager_Show_Original(pThis, pt, inputDeviceKind);
+    g_ovShowCalls.fetch_add(1, std::memory_order_relaxed);
+    if (g_unloading.load()) return;
+    if (!g_overflowWeak.get()) {
+        TryExtractOverflowRootGridFromManager(pThis);
+    }
+    if (g_overflowWeak.get()) {
+        DispatchWalkContainer(g_overflowWeak, true);
+    }
+    FlushStatusFile(false);
+}
+
+void WINAPI SystemTrayController_UpdateOverflowIcons_Hook(void* pThis) {
+    SystemTrayController_UpdateOverflowIcons_Original(pThis);
+    g_ovUpdateCalls.fetch_add(1, std::memory_order_relaxed);
+    if (g_unloading.load()) return;
+    if (g_overflowWeak.get()) {
+        DispatchWalkContainer(g_overflowWeak, true);
+    }
+}
+
+int32_t WINAPI TaskbarFrame_MeasureOverride_Hook(void* pThis, uint64_t availSizeBits, void* pReturnSize) {
+    int32_t hr = TaskbarFrame_MeasureOverride_Original(pThis, availSizeBits, pReturnSize);
+    if (g_unloading.load() || !pThis) return hr;
+    try {
+        uint32_t curGen = g_settingsGeneration.load(std::memory_order_acquire);
+        if (g_trayFrameWeak.get() && g_lastTraySweepGen.load(std::memory_order_acquire) == curGen) {
+            return hr;
+        }
+        wux::FrameworkElement fe{nullptr};
+        if (SUCCEEDED(reinterpret_cast<IUnknown*>(pThis)->QueryInterface(
+                winrt::guid_of<wux::FrameworkElement>(), winrt::put_abi(fe))) && fe) {
+            if (auto stFrame = FindSystemTrayFrameInTaskbar(fe)) {
+                g_trayFrameWeak = winrt::make_weak(stFrame);
+                g_systemTrayFound.store(true, std::memory_order_release);
+                g_lastTraySweepGen.store(curGen, std::memory_order_release);
+                g_lastTraySweepTick.store(GetTickCount64(), std::memory_order_relaxed);
+                WalkTraySubtree(stFrame);
+                FlushStatusFile(false);
+            }
+        }
+    } catch (...) {
+    }
+    return hr;
+}
 
 int32_t WINAPI ImageIconContent_MeasureOverride_Hook(void* pThis, uint64_t availSizeBits, void* pReturnSize) {
     int32_t hr = ImageIconContent_MeasureOverride_Original(pThis, availSizeBits, pReturnSize);
@@ -1422,14 +1882,50 @@ BOOL Wh_ModInit() {
 
     WindhawkUtils::SYMBOL_HOOK trayHooks[] = {
         {
+            {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::SystemTrayFrame,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::ArrangeOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
+            &SystemTrayFrame_ArrangeOverride_Original,
+            SystemTrayFrame_ArrangeOverride_Hook,
+        },
+        {
+            {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::NotificationAreaOverflow,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::ArrangeOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
+            &Overflow_ArrangeOverride_Original,
+            Overflow_ArrangeOverride_Hook,
+            true,
+        },
+        {
+            {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::NotificationAreaOverflow,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::OnApplyTemplate(void))"},
+            &Overflow_OnApplyTemplate_Original,
+            Overflow_OnApplyTemplate_Hook,
+            true,
+        },
+        {
             {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::ImageIconContent,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::MeasureOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
             &ImageIconContent_MeasureOverride_Original,
             ImageIconContent_MeasureOverride_Hook,
+            true,
         },
         {
             {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::ImageIconContentViewModel,struct winrt::SystemTray::IImageIconContentViewModel>::put_IconImageSource(void *))"},
             &ImageIconVM_put_IconImageSource_Original,
             ImageIconVM_put_IconImageSource_Hook,
+            true,
+        },
+        {
+            {LR"(private: void __cdecl winrt::SystemTray::OverflowXamlIslandManager::InitializeIfNeeded(void))"},
+            &OverflowManager_InitializeIfNeeded_Original,
+            OverflowManager_InitializeIfNeeded_Hook,
+            true,
+        },
+        {
+            {LR"(public: void __cdecl winrt::SystemTray::OverflowXamlIslandManager::Show(struct tagPOINT,enum winrt::WindowsUdk::UI::Shell::InputDeviceKind))"},
+            &OverflowManager_Show_Original,
+            OverflowManager_Show_Hook,
+            true,
+        },
+        {
+            {LR"(private: void __cdecl winrt::SystemTray::implementation::SystemTrayController::UpdateNotificationAreaOverflowIcons(void))"},
+            &SystemTrayController_UpdateOverflowIcons_Original,
+            SystemTrayController_UpdateOverflowIcons_Hook,
             true,
         },
     };
@@ -1442,15 +1938,61 @@ BOOL Wh_ModInit() {
         return FALSE;
     }
 
+    if (HMODULE tbView = GetModuleHandleW(L"Taskbar.View.dll")) {
+        WindhawkUtils::SYMBOL_HOOK tbHooks[] = {
+            {
+                {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::Taskbar::implementation::TaskbarFrame,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::MeasureOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
+                &TaskbarFrame_MeasureOverride_Original,
+                TaskbarFrame_MeasureOverride_Hook,
+                true,
+            },
+        };
+        WindhawkUtils::HookSymbols(tbView, tbHooks, ARRAYSIZE(tbHooks));
+    }
+
+    if (HMODULE taskbarDll = GetModuleHandleW(L"taskbar.dll")) {
+        WindhawkUtils::SYMBOL_HOOK taskbarDllHooks[] = {
+            {
+                {LR"(const CTaskBand::`vftable'{for `ITaskListWndSite'})"},
+                &CTaskBand_ITaskListWndSite_vftable,
+                nullptr,
+                true,
+            },
+            {
+                {LR"(public: virtual class std::shared_ptr<class TaskbarHost> __cdecl CTaskBand::GetTaskbarHost(void)const )"},
+                &CTaskBand_GetTaskbarHost_Original,
+                nullptr,
+                true,
+            },
+            {
+                {LR"(public: int __cdecl TaskbarHost::FrameHeight(void)const )"},
+                &TaskbarHost_FrameHeight_Original,
+                nullptr,
+                true,
+            },
+            {
+                {LR"(public: void __cdecl std::_Ref_count_base::_Decref(void))"},
+                &std__Ref_count_base__Decref_Original,
+                nullptr,
+                true,
+            },
+        };
+        WindhawkUtils::HookSymbols(taskbarDll, taskbarDllHooks, ARRAYSIZE(taskbarDllHooks));
+    }
+
     g_hookInstalled.store(true, std::memory_order_release);
-    Wh_Log(L"LiquidGlassSystemTray initialized: MeasureOverride=%p put_IconImageSource=%p",
-           ImageIconContent_MeasureOverride_Original, ImageIconVM_put_IconImageSource_Original);
+    Wh_Log(L"LiquidGlassSystemTray initialized: TrayArr=%p OvArr=%p OvTpl=%p OvInit=%p OvShow=%p OvUpd=%p ImgMeas=%p TbHost=%p",
+           SystemTrayFrame_ArrangeOverride_Original, Overflow_ArrangeOverride_Original,
+           Overflow_OnApplyTemplate_Original, OverflowManager_InitializeIfNeeded_Original,
+           OverflowManager_Show_Original, SystemTrayController_UpdateOverflowIcons_Original,
+           ImageIconContent_MeasureOverride_Original, CTaskBand_GetTaskbarHost_Original);
     FlushStatusFile(true);
     return TRUE;
 }
 
 void Wh_ModAfterInit() {
     g_unloading.store(false, std::memory_order_release);
+    SweepTaskbarColdStart();
     FlushStatusFile(true);
 }
 
@@ -1462,6 +2004,14 @@ void Wh_ModSettingsChanged() {
         cfg = g_settings;
     }
     ReapplyOrRestoreAllDispatchers(!cfg.enabled, false);
+    if (cfg.enabled) {
+        if (g_trayFrameWeak.get()) {
+            DispatchWalkContainer(g_trayFrameWeak, false);
+        } else {
+            SweepTaskbarColdStart();
+        }
+        DispatchWalkContainer(g_overflowWeak, true);
+    }
     FlushStatusFile(true);
 }
 
