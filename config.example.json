@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "desktop": {
+    "opacity": 1.0,
+    "frost": 1.0,
+    "glow": 1.0,
+    "dark_protect": 1.0
+  },
+  "startmenu": {
+    "opacity": 1.0,
+    "frost": 1.0,
+    "glow": 1.0,
+    "dark_protect": 1.0
+  },
+  "taskbar": {
+    "opacity": 1.0,
+    "frost": 1.0,
+    "glow": 1.0,
+    "dark_protect": 1.0
+  },
+  "watcher": {
+    "enabled": false,
+    "debounce_sec": 3.0
+  },
+  "lifecycle": {
+    "restore_live_on_exit": false,
+    "exit_when_window_closes": false
+  }
+}

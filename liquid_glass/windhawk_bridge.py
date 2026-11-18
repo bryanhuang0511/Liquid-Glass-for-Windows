@@ -1,11 +1,13 @@
-r"""windhawk_bridge.py -- Liquid Glass 圖示中樞 <-> Windhawk 本機即時引擎控制橋接。
+r"""liquid_glass/windhawk_bridge.py -- Liquid Glass for Windows <-> Windhawk 本機即時引擎控制橋接。
 
-職責：
-  1. 自動偵測本機 Windhawk 安裝（可攜版 C:\Windhawk、標準安裝 C:\Program Files\Windhawk、登錄檔或環境變數覆寫）與執行狀態。
-  2. 視需要自動呼叫 Windhawk 內建 clang++ 編譯專屬即時模組（local@liquid-glass-taskbar-icons / local@liquid-glass-startmenu-icons）。
-  3. 依 Windhawk 儲存模式（可攜版 INI 或標準安裝版 HKLM 登錄檔）讀寫模組設定，達成一鍵啟用、滑桿即時熱更新、一鍵秒速還原。
-  4. 讀取本機固定路徑診斷 JSON，不觸碰任何其他已安裝模組或磁碟圖示暫存。
+Functionality:
+1. 自動偵測本機 Windhawk 安裝（可攜版 C:\Windhawk、標準安裝 C:\Program Files\Windhawk、登錄檔或環境變數覆寫）與執行狀態。
+2. 視需要自動呼叫 Windhawk 內建 clang++ 編譯專屬即時模組（local@liquid-glass-taskbar-icons / local@liquid-glass-startmenu-icons）。
+3. 依 Windhawk 儲存模式（可攜版 INI 或標準安裝版 HKLM 登錄檔）讀寫模組設定，達成一鍵啟用、滑桿即時熱更新與秒速還原。
+4. 讀取本機固定路徑 Telemetry JSON 與清理過期版本 DLL，不觸碰任何其他已安裝模組或磁碟圖示暫存。
 """
+from __future__ import annotations
+
 import configparser
 import ctypes
 from ctypes import wintypes
@@ -23,7 +25,7 @@ try:
 except ImportError:
     winreg = None
 
-import glass_specs as S
+from liquid_glass import specs as S
 
 MOD_ID = "local@liquid-glass-taskbar-icons"
 MOD_VERSION = "1.0.0"
@@ -60,7 +62,7 @@ def _spec(scope="taskbar"):
 def _default_resource_root():
     if getattr(sys, "frozen", False):
         return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
-    return os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def find_source_cpp(base_dir=None, scope="taskbar"):
@@ -69,7 +71,7 @@ def find_source_cpp(base_dir=None, scope="taskbar"):
     if base_dir:
         roots.append(base_dir)
     roots.append(_default_resource_root())
-    roots.append(os.path.dirname(os.path.abspath(__file__)))
+    roots.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     for root in roots:
         cand = os.path.join(root, *rel)
         if os.path.exists(cand):
@@ -167,7 +169,7 @@ def _candidate_windhawk_dirs():
 def find_windhawk_dir(wh_dir=None):
     if wh_dir:
         return wh_dir
-    env_dir = os.environ.get("LGIC_WINDHAWK_DIR")
+    env_dir = os.environ.get("LGFW_WINDHAWK_DIR") or os.environ.get("LGIC_WINDHAWK_DIR")
     if env_dir:
         return env_dir
     for cand in _candidate_windhawk_dirs():

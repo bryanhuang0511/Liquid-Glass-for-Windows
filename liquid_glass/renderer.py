@@ -1,17 +1,20 @@
-"""glass_render.py -- Liquid Glass 渲染核心（只依賴 PIL + numpy，不碰 Windows API，可獨立測試）。
-三種風格：
-  desktop   風格 A：1:1 Squircle 霜白外框 + 飽滿霜白剪影（公式沿用已驗收版本）
-  startmenu 風格 B：雕刻加粗玻璃（無框；加粗邊線 + 透光膜 + 左上受光/右下收光浮雕）
-  taskbar   極細鏤空發光線條（無框；嚴禁填滿）
-共用前處理：Alpha 邊界自適應正規化（normalize_glyph_bbox），讓各家軟體的圖騰視覺大小一致。
-風格 B / 工作列的每個 ICO 尺寸層都「原生合成」：線寬以輸出像素為準，32px 不會變成 0.2px 虛線。
+"""liquid_glass/renderer.py -- Liquid Glass 光學渲染核心（僅依賴 PIL + NumPy，不碰 Windows API）。
+
+Functionality:
+1. 實作桌面與即時引擎對齊之光學液態玻璃轉換（zero-black/gray RGB、霜白高光、內縮斜角 Rim、接縫 Seam 光）。
+2. 提供保守單色／漸層底板分離與品牌微染（separate_solid_backplate）、圖騰邊界正規化。
+3. 原生分層渲染 ICO_SIZES（256..16px）與 UI 控制中心即時預覽圖產出。
 """
+from __future__ import annotations
+
 import functools
 import math
 import os
+
 import numpy as np
 from PIL import Image, ImageDraw
-from glass_specs import ICO_SIZES, clamp_params
+
+from liquid_glass.specs import ICO_SIZES, clamp_params
 F32 = np.float32
 _LANCZOS = Image.Resampling.LANCZOS
 _BOX = Image.Resampling.BOX
