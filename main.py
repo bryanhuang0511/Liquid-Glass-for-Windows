@@ -50,8 +50,8 @@ def _cli(app: TC.LiquidGlassApp, argv: Sequence[str]) -> int:
         return err
     skipped_opt: list[str] = []
     if target == "all":
-        avail = SM.effective_active_scopes(include_experimental=(kind == "restore")) or ["desktop"]
-        skipped_opt = [sc for sc in scopes if sc not in avail and not S.SPECS[sc].get("experimental")]
+        avail = SM.effective_active_scopes() or ["desktop"]
+        skipped_opt = [sc for sc in scopes if sc not in avail]
         scopes = avail
     res = SM.run_batch(kind, scopes, app.config)
     msg = SM.summarize(res, kind)

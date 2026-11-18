@@ -478,7 +478,7 @@ class LiquidGlassApp:
             SM.restore_live_scopes_on_exit()
 
     def _warm_previews(self, api: Any) -> None:
-        """在背景提前熱載入 NumPy / PIL 並快取核心三區預設預覽圖。"""
+        """在背景提前熱載入 NumPy / PIL 並快取全部四區預設預覽圖。"""
         try:
             dpr = 1.0
             if RT.IS_WIN and RT.user32 is not None:
@@ -528,20 +528,22 @@ class LiquidGlassApp:
             for sc in S.SCOPES:
                 locked = S.is_scope_locked(sc)
                 need_wh = bool(S.SPECS[sc].get("requires_windhawk")) and not wh_ok
-                suffix = "（🔒 已封鎖）" if locked else ("（🔌 需安裝 Windhawk）" if need_wh else ("（獨立測試）" if S.SPECS[sc].get("experimental") else ""))
+                suffix = "（🔒 已封鎖）" if locked else ("（🔌 需安裝 Windhawk）" if need_wh else "")
                 title = f"{S.SPECS[sc]['icon']} {S.SPECS[sc]['label']}{suffix}"
                 items.append(pystray.MenuItem(title, bg(kind, [sc]), enabled=(not locked and not need_wh)))
             return items
 
+        all_avail = SM.effective_active_scopes() or ["desktop"]
         quick_items = [
-            pystray.MenuItem("🖥️ 套用桌面 Liquid Glass", bg("apply", ["desktop"])),
-            pystray.MenuItem("🛡️ 還原桌面原生圖示", bg("restore", ["desktop"])),
+            pystray.MenuItem(
+                "✨ 一鍵套用全部四區" if wh_ok else "🖥️ 一鍵套用可用區域（桌面）",
+                bg("apply", all_avail),
+            ),
+            pystray.MenuItem(
+                "🛡️ 一鍵還原全部區域" if wh_ok else "🛡️ 還原桌面原生圖示",
+                bg("restore", all_avail),
+            ),
         ]
-        if wh_ok:
-            quick_items = [
-                pystray.MenuItem("📌 啟用工作列 Liquid Glass", bg("apply", ["taskbar"])),
-                pystray.MenuItem("🛡️ 還原工作列原生圖示", bg("restore", ["taskbar"])),
-            ] + quick_items
 
         exit_items = []
         if wh_ok:

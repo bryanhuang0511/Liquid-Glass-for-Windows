@@ -22,8 +22,8 @@ def test_all_three_scopes_active_and_unlocked(env, monkeypatch):
 
     assert S.ACTIVE_SCOPES == ("taskbar", "startmenu", "desktop", "tray")
     assert S.LOCKED_SCOPES == ()
-    assert SM.effective_active_scopes() == ["taskbar", "startmenu", "desktop"]
-    assert SM.effective_active_scopes(include_experimental=True) == ["taskbar", "startmenu", "desktop", "tray"]
+    assert SM.effective_active_scopes() == ["taskbar", "startmenu", "desktop", "tray"]
+    assert SM.effective_active_scopes(include_experimental=False) == ["taskbar", "startmenu", "desktop", "tray"]
     for sc in S.SCOPES:
         assert not S.is_scope_locked(sc)
     assert S.is_scope_locked("bogus")
@@ -57,7 +57,7 @@ def test_api_unlocks_all_three_scopes_and_exposes_engines(env, monkeypatch):
         assert st["specs"][sc]["locked"] is False
     assert "startmenu_engine" in st and st["startmenu_engine"]["scope"] == "startmenu"
     assert "tray_engine" in st and st["tray_engine"]["scope"] == "tray"
-    assert st["experimental_scopes"] == ["tray"]
+    assert st["experimental_scopes"] == []
     assert api.get_engine_status("startmenu")["scope"] == "startmenu"
     assert api.get_engine_status("tray")["scope"] == "tray"
     assert st["watcher_locked"] is False
@@ -67,11 +67,15 @@ def test_api_unlocks_all_three_scopes_and_exposes_engines(env, monkeypatch):
     assert api.apply_all({sc: S.default_params(sc) for sc in S.SCOPES})["ok"] is True
     assert WB.get_status(scope="taskbar")["enabled"] is True
     assert WB.get_status(scope="startmenu")["enabled"] is True
+    assert WB.get_status(scope="tray")["enabled"] is True
+    assert api.restore_scope("tray")["ok"] is True
     assert WB.get_status(scope="tray")["enabled"] is False
+    assert WB.get_status(scope="taskbar")["enabled"] is True
     assert api.apply_scope("tray", S.default_params("tray"))["ok"] is True
     assert WB.get_status(scope="tray")["enabled"] is True
     assert api.restore_all()["ok"] is True
     assert WB.get_status(scope="tray")["enabled"] is False
+    assert WB.get_status(scope="taskbar")["enabled"] is False
 
     assert api.set_watcher(True) is True
     assert json.load(open(RT.CONFIG_PATH))["watcher"]["enabled"] is True
@@ -91,7 +95,10 @@ def test_cli_supports_all_three_scopes_and_rejects_bogus(env):
     assert M.main(["--apply"]) == 0
     assert WB.get_status(scope="taskbar")["enabled"] is True
     assert WB.get_status(scope="startmenu")["enabled"] is True
+    assert WB.get_status(scope="tray")["enabled"] is True
+    assert M.main(["--restore", "tray"]) == 0
     assert WB.get_status(scope="tray")["enabled"] is False
+    assert WB.get_status(scope="taskbar")["enabled"] is True
     assert M.main(["--apply", "tray"]) == 0
     st_tr = WB.get_status(scope="tray")
     assert st_tr["enabled"] is True and st_tr["ini_settings"]["Opacity"] == "100"
@@ -239,7 +246,7 @@ def test_ui_html_has_wiztree_non_blocking_banner(env):
         "repeat(4, 1fr)",
         "tray_engine",
         "ENGINE_META",
-        "獨立測試",
+        "一鍵套用全部四區",
     ):
         assert token in html
     for stale in ("桌面・開始功能表目前封鎖", "開始功能表封鎖中", "開始功能表暫未開放"):
@@ -260,11 +267,11 @@ def test_optional_extension_fallback_without_windhawk(env, tmp_path, monkeypatch
     assert st["default_scope"] == "desktop"
     assert st["available_scopes"] == ["desktop"]
     assert st["optional_scopes"] == ["taskbar", "startmenu", "tray"]
-    assert st["experimental_scopes"] == ["tray"]
+    assert st["experimental_scopes"] == []
     assert st["specs"]["desktop"]["requires_windhawk"] is False
     assert st["specs"]["taskbar"]["requires_windhawk"] is True and "深色模式" in st["specs"]["taskbar"]["advisory"]
     assert st["specs"]["startmenu"]["requires_windhawk"] is True and "深色模式" in st["specs"]["startmenu"]["advisory"]
-    assert st["specs"]["tray"]["requires_windhawk"] is True and st["specs"]["tray"]["experimental"] is True
+    assert st["specs"]["tray"]["requires_windhawk"] is True and st["specs"]["tray"]["experimental"] is False
 
     r_all = api.apply_all({sc: S.default_params(sc) for sc in S.SCOPES})
     assert r_all["ok"] is True and [r["scope"] for r in r_all["results"]] == ["desktop"]
