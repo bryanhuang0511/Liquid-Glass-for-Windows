@@ -1,5 +1,5 @@
 // ==WindhawkMod==
-// @id              local@liquid-glass-startmenu-icons
+// @id              liquid-glass-startmenu-icons
 // @name            Liquid Glass Start Menu Icons
 // @description     Universal real-time optical Liquid Glass transformation for Windows 11 Start Menu icons
 // @version         1.0.0

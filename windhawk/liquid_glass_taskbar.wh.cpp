@@ -1,5 +1,5 @@
 // ==WindhawkMod==
-// @id              local@liquid-glass-taskbar-icons
+// @id              liquid-glass-taskbar-icons
 // @name            Liquid Glass Taskbar Icons
 // @description     Universal real-time optical Liquid Glass transformation for Windows 11 taskbar icons
 // @version         1.0.0

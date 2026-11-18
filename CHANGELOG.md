@@ -2,6 +2,13 @@
 
 All notable changes to **Liquid Glass for Windows** will be documented in this file.
 
+## [v2.2.1] - 2026-11-19
+### Fixed
+- **Windhawk Mod Metadata Compatibility (`// @id`)**: Removed the redundant `local@` prefix from `// @id` inside `windhawk/liquid_glass_taskbar.wh.cpp`, `windhawk/liquid_glass_startmenu.wh.cpp`, and `windhawk/liquid_glass_tray.wh.cpp` while keeping `local@` storage filenames (`ModsSource/local@*.wh.cpp`, `Engine/Mods/local@*.ini`, and `local@*.dll`). Resolves Windhawk UI's `"Mod id must only contain the following characters: 0-9, a-z, and a hyphen (-)"` error toast and restores Name/Description/Author/Version display inside Windhawk's Installed Mods list.
+
+### Added
+- **Automated Windhawk Metadata Regression Test**: Added `test_windhawk_source_metadata_matches_windhawk_validator` in `tests/test_windhawk_bridge.py` (`90` total test cases) to enforce Windhawk's `validateMetadata` regex and local mod slug consistency across all three `.wh.cpp` sources.
+
 ## [v2.2.0] - 2026-11-18
 ### Changed
 - **Unified Four-Scope One-Click Apply + Independent Per-Scope Controls**: Promoted System Tray (`tray`) out of experimental opt-in isolation (`experimental = false` in `liquid_glass/specs.py`). Global batch controls (`apply_all`, `restore_all`, CLI `--apply`, UI `#btnApplyAll`, and Tray quick actions) now apply all four areas together (`taskbar`, `startmenu`, `desktop`, `tray`) when Windhawk is detected while preserving individual per-tab apply/restore/tuning and the notification-area process whitelist.

@@ -1,12 +1,17 @@
-# 🧭 Liquid Glass for Windows — 交接紀錄與完成歸檔（v2.1.0 ➔ v2.2.0）
+# 🧭 Liquid Glass for Windows — 交接紀錄與完成歸檔（v2.1.0 ➔ v2.2.1）
 
-> **建立日期**：2026-11-18  
-> **目前版本**：`v2.2.0`（已完成四區一鍵套用整併、實機驗收並發布至 GitHub）  
-> **狀態**：**✅ 原先排入之 `v2.2.0` 整併項目已全部提前完成並驗收收工**。
+> **建立日期**：2026-11-18（`v2.2.1` 修補更新於 2026-11-19）  
+> **目前版本**：`v2.2.1`（已完成四區一鍵套用整併、Windhawk `@id` 表頭相容性修正並發布至 GitHub）  
+> **狀態**：**✅ 全部功能與修補項目皆已驗收並完成歸檔**。
 
 ---
 
-## ✅ 1. 已於 `v2.2.0` 完成整併之項目（原待辦已清空）
+## ✅ 1. `v2.2.1` 介面表頭相容性小修補（2026-11-19）
+
+- 修正 `windhawk/liquid_glass_taskbar.wh.cpp`、`windhawk/liquid_glass_startmenu.wh.cpp`、`windhawk/liquid_glass_tray.wh.cpp` 第 2 行表頭 `// @id`，移除多餘 `local@` 前綴並維持儲存檔名使用 `local@*.wh.cpp`／`local@*.ini`，徹底消除 Windhawk 主程式視窗右下角紅字 `Mod id must only contain the following characters: 0-9, a-z, and a hyphen (-)` 並恢復模組名稱／說明／版本顯示。
+- 於 `tests/test_windhawk_bridge.py` 新增 `test_windhawk_source_metadata_matches_windhawk_validator` 單元防呆測試。
+
+## ✅ 2. 已於 `v2.2.0` 完成整併之項目（原待辦已清空）
 
 1. **將「一鍵套用核心三區」升級為「一鍵套用全部四區 ＋ 各區獨立控制」**（已完成）：
    - [`liquid_glass/specs.py`](../liquid_glass/specs.py) 已移除 `tray` 實驗隔離（`experimental: False`），`VERSION` 升至 `2.2.0`。
@@ -16,7 +21,7 @@
 
 ---
 
-## ✅ 2. `v2.1.0` 已完成驗證的穩定基準
+## ✅ 3. `v2.1.0` 已完成驗證的穩定基準
 
 - **Windhawk 同款關閉縮小常駐通知區**：關閉設定視窗移除工作列圖示並保留背景常駐與即時效果（標準／系統管理員權限、跨 UIPI 喚醒與防 WebView2 殘留 `os._exit(0)` 已驗證）。
 - **通知列暨 `^` 溢位面板即時引擎（`windhawk/liquid_glass_tray.wh.cpp`）**：
@@ -26,7 +31,7 @@
 
 ---
 
-## 🧹 3. 收尾保留項目說明
+## 🧹 4. 收尾保留項目說明
 
 - **本機運行必要檔案（務必持續保留）**：`LiquidGlassForWindows.exe`、`_internal/`、`config.json`、`IconVault/`、`Original_Shortcuts_Backup/`。
 - **後續若重返擴充時建議評估方向**：目前所有區域功能均已完整就緒；未來如有需要，僅剩純視覺進階自訂項目（例如外框強度微調、特定捷徑圖示黑／白名單或自動開機延遲策略）。

@@ -1,5 +1,5 @@
 // ==WindhawkMod==
-// @id              local@liquid-glass-tray-icons
+// @id              liquid-glass-tray-icons
 // @name            Liquid Glass System Tray Icons
 // @description     Real-time optical Liquid Glass transformation for Windows 11 system tray & overflow (^) icons
 // @version         1.0.0
@@ -11,7 +11,7 @@
 
 // ==WindhawkModReadme==
 /*
-# Liquid Glass System Tray Icons (Experimental 4th Scope)
+# Liquid Glass System Tray Icons
 
 Applies real-time optical Liquid Glass rendering (translucent ice-white glass,
 frosted highlights, directional inner bevel rim and seam glints) to Windows 11

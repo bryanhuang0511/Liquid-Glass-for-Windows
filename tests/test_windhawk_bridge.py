@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 
 from liquid_glass import specs as S
@@ -170,3 +171,33 @@ def test_stale_mod_dll_cleanup_and_win32_process_probe(env, monkeypatch):
         assert WB._is_process_running_win32(cur_exe) is True
         assert WB._is_process_running_win32("__nonexistent_lgfw_proc__.exe") is False
         assert isinstance(WB.is_windhawk_running(), bool)
+
+
+def _parse_windhawk_mod_header(cpp_text: str) -> dict[str, str]:
+    match = re.search(
+        r"^//[ \t]+==WindhawkMod==[ \t]*$\r?\n(.*?)\r?\n^//[ \t]+==/WindhawkMod==[ \t]*$",
+        cpp_text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None, "missing // ==WindhawkMod== metadata block"
+    meta: dict[str, str] = {}
+    for line in match.group(1).splitlines():
+        item = re.match(r"^//[ \t]+@([a-zA-Z]+)[ \t]+(.*)$", line)
+        assert item is not None, f"unparseable Windhawk metadata line: {line!r}"
+        meta[item.group(1)] = item.group(2).strip()
+    return meta
+
+
+def test_windhawk_source_metadata_matches_windhawk_validator():
+    for scope, spec in WB.MOD_SPECS.items():
+        cpp_path = WB.find_source_cpp(scope=scope)
+        assert cpp_path is not None and os.path.exists(cpp_path)
+        with open(cpp_path, "r", encoding="utf-8") as handle:
+            meta = _parse_windhawk_mod_header(handle.read())
+        mod_id = meta.get("id", "")
+        assert re.fullmatch(r"[0-9a-z-]+", mod_id), f"{scope}: invalid @id {mod_id!r}"
+        assert mod_id == spec["mod_id"].removeprefix("local@")
+        assert meta.get("name") and meta.get("description") and meta.get("author")
+        assert meta.get("version") == spec["version"]
+        assert meta.get("include") == spec["include"]
+        assert meta.get("architecture") in {"x86", "x86-64", "amd64", "arm64"}
