@@ -20,7 +20,10 @@ def test_windhawk_bridge_ini_settings_restore_and_status(env):
         ini = WB.read_mod_ini(WB.resolve_windhawk_paths(scope=sc)["ini_path"])
         assert ini["mod"]["Disabled"] == "0"
         assert ini["mod"]["Include"] == target_proc
-        assert ini["settings"] == {"Enabled": "1", "Opacity": "85", "Frost": "115", "Glow": "140", "DarkProtect": "90"}
+        expected = {"Enabled": "1", "Opacity": "85", "Frost": "115", "Glow": "140", "DarkProtect": "90"}
+        if sc == "tray":
+            expected["WhitelistApps"] = S.DEFAULT_TRAY_WHITELIST
+        assert ini["settings"] == expected
 
         sync1 = WB.update_settings_if_active({"opacity": 1.0, "frost": 0.95, "glow": 1.25, "dark_protect": 1.1}, scope=sc)
         assert sync1 == {"ok": True, "synced": True}
@@ -135,6 +138,18 @@ def test_windhawk_auto_detection_and_standard_storage(env, tmp_path, monkeypatch
     deny_write["flag"] = True
     r_denied = WB.apply_windhawk_mod("startmenu", S.default_params("startmenu"))
     assert r_denied["ok"] is False and r_denied.get("needs_admin") is True
+
+    deny_write["flag"] = False
+    r_tray = WB.apply_windhawk_mod(
+        "tray",
+        {"opacity": 1.0, "frost": 1.0, "glow": 1.0, "dark_protect": 1.0},
+        whitelist="HWiNFO64.exe;AIDA64.exe",
+    )
+    assert r_tray["ok"] is True
+    assert WB.get_status(scope="tray")["ini_settings"]["WhitelistApps"] == "HWiNFO64.exe;AIDA64.exe"
+    assert WB.update_settings_if_active({"opacity": 0.8}, scope="tray") == {"ok": True, "synced": True}
+    assert WB.get_status(scope="tray")["ini_settings"]["WhitelistApps"] == "HWiNFO64.exe;AIDA64.exe"
+    assert WB.get_status(scope="tray")["ini_settings"]["Opacity"] == "80"
 
 
 def test_stale_mod_dll_cleanup_and_win32_process_probe(env, monkeypatch):

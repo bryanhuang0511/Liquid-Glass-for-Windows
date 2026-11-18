@@ -61,3 +61,8 @@ def test_specs_ext_and_result_fields_and_watcher_clamp():
     cfg = S.migrate_config({"desktop": {"line": 2.0}, "watcher": {"enabled": True, "debounce_sec": 7}})
     assert cfg["watcher"] == {"enabled": True, "debounce_sec": 7.0}
     assert S.migrate_config({})["watcher"] == S.default_watcher()
+    assert S.default_config()["tray_whitelist"] == S.DEFAULT_TRAY_WHITELIST
+    assert S.normalize_tray_whitelist(None) == S.DEFAULT_TRAY_WHITELIST
+    assert S.normalize_tray_whitelist("") == ""
+    assert S.normalize_tray_whitelist("HWiNFO64.exe, hwinfo64.exe\naida64.exe ; Steam") == "HWiNFO64.exe;aida64.exe;Steam"
+    assert S.migrate_config({"tray_whitelist": "aida64.exe, HWiNFO"})["tray_whitelist"] == "aida64.exe;HWiNFO"

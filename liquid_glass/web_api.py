@@ -75,6 +75,7 @@ class LiquidGlassApi:
             "backup_count": SM.count_backups(),
             "is_admin": RT.is_admin(),
             "tray_running": TC.is_tray_running(),
+            "tray_whitelist": S.normalize_tray_whitelist(self._app.config.get("tray_whitelist")),
             "taskbar_engine": tb_st,
             "startmenu_engine": sm_st,
             "tray_engine": tr_st,
@@ -139,8 +140,37 @@ class LiquidGlassApi:
             self._app.config[scope] = S.clamp_params(scope, params)
             self._app.save_config()
             if scope in WB.MOD_SPECS:
-                WB.update_settings_if_active(self._app.config[scope], scope=scope)
+                wl = (
+                    S.normalize_tray_whitelist(self._app.config.get("tray_whitelist"))
+                    if scope == "tray"
+                    else None
+                )
+                WB.update_settings_if_active(self._app.config[scope], scope=scope, whitelist=wl)
         return True
+
+    def set_tray_whitelist(self, whitelist_text: str) -> dict[str, Any]:
+        """儲存通知列排除白名單（保留原色不剝色）並即時熱同步至 Windhawk 模組。"""
+        normalized = S.normalize_tray_whitelist(whitelist_text)
+        self._app.config["tray_whitelist"] = normalized
+        self._app.save_config()
+        sync_res = WB.update_settings_if_active(
+            self._app.config.get("tray", S.default_params("tray")),
+            scope="tray",
+            whitelist=normalized,
+        )
+        items = [x for x in normalized.split(";") if x]
+        return {
+            "ok": bool(sync_res.get("ok", True)),
+            "tray_whitelist": normalized,
+            "count": len(items),
+            "synced": bool(sync_res.get("synced")),
+            "needs_admin": bool(sync_res.get("needs_admin")),
+            "message": (
+                f"已儲存通知列排除白名單（共 {len(items)} 條規則）並即時同步"
+                if sync_res.get("synced")
+                else f"已儲存通知列排除白名單（共 {len(items)} 條規則，啟用通知列模組時即生效）"
+            ),
+        }
 
     # Lines 137-205: 套用 / 還原與系統管理員提權控制
     def _batch_response(self, kind: str, res: list[dict[str, Any]] | None) -> dict[str, Any]:

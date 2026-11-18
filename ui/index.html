@@ -344,6 +344,11 @@
 
   .elevate-msg { flex: 1; min-width: 240px; font-size: 12.5px; line-height: 1.48; color: #fde68a; }
 
+  .wl-box { width: 100%; min-height: 62px; resize: vertical; border-radius: 11px; padding: 9px 11px;
+    background: rgba(15,23,42,0.72); border: 1px solid rgba(255,255,255,0.16); color: var(--ink);
+    font: 12.5px/1.5 ui-monospace, 'Cascadia Mono', Consolas, monospace; outline: none; margin-bottom: 10px; }
+  .wl-box:focus { border-color: rgba(96,165,250,0.75); box-shadow: 0 0 0 2px rgba(96,165,250,0.18); }
+
 </style>
 
 </head>
@@ -360,7 +365,7 @@
 
 <div>
 
-<h1>Liquid Glass for Windows<small id="ver">v2.0.0</small></h1>
+<h1>Liquid Glass for Windows<small id="ver">v2.1.0</small></h1>
 
 <div class="sub">桌面原生光學圖示立即可用｜工作列與開始功能表為 Windhawk 選用擴充</div>
 
@@ -455,6 +460,26 @@
 <div class="eng-item"><b>純記憶體快取 (LRU)</b><span id="engCache">—</span></div>
 
 <div class="eng-item"><b>低解析度圖示紀錄</b><span id="engLowRes">—</span></div>
+
+</div>
+
+</div>
+
+<div class="card" id="trayWhitelistCard" style="display:none">
+
+<div class="card-title"><span>🛡️ 通知列排除白名單（保留原色不轉換）</span><span class="note">以分號「;」分隔 .exe 檔名或應用程式名稱；預設已自動保護 HWiNFO64 全部動態感測器</span></div>
+
+<textarea class="wl-box" id="txtTrayWhitelist" placeholder="例如：HWiNFO64.exe;HWiNFO32.exe;HWiNFO;AIDA64.exe" spellcheck="false"></textarea>
+
+<div class="btns">
+
+<button class="btn primary" id="btnSaveTrayWhitelist" type="button">💾 儲存白名單並即時套用</button>
+
+<button class="btn ghost" id="btnWlAddHwinfo" type="button">+ HWiNFO64</button>
+
+<button class="btn ghost" id="btnWlAddAida" type="button">+ AIDA64</button>
+
+<button class="btn ghost" id="btnWlReset" type="button">↺ 恢復預設</button>
 
 </div>
 
@@ -751,6 +776,8 @@ function selectScope(id) {
   const isWh = scopeNeedsWh(id);
 
   if ($('engineCard')) $('engineCard').style.display = isWh ? 'block' : 'none';
+
+  if ($('trayWhitelistCard')) $('trayWhitelistCard').style.display = (id === 'tray') ? 'block' : 'none';
 
   updateScopeControls();
 
@@ -1134,7 +1161,15 @@ function renderEngineTelemetry(st, sc = scope) {
 
     $('engCache').textContent = `${t.cache_entries || 0}/${maxEnt} 筆（${mb} / ${maxMb} MB）`;
 
-    $('engLowRes').textContent = `${t.low_res_count || 0} 顆低解析圖示`;
+    if (sc === 'tray' && typeof t.whitelist_skips === 'number') {
+
+      $('engLowRes').textContent = `${t.low_res_count || 0} 低解析｜白名單保留 ${t.whitelist_skips} 次`;
+
+    } else {
+
+      $('engLowRes').textContent = `${t.low_res_count || 0} 顆低解析圖示`;
+
+    }
 
   } else {
 
@@ -1336,6 +1371,8 @@ function initUI() {
 
     if ($('swRestoreOnExit')) $('swRestoreOnExit').checked = !!s.restore_on_exit;
 
+    if ($('txtTrayWhitelist')) $('txtTrayWhitelist').value = (s.tray_whitelist !== undefined ? s.tray_whitelist : 'HWiNFO64.exe;HWiNFO32.exe;HWiNFO');
+
     if ($('watcherRow')) {
 
       $('watcherRow').style.opacity = s.watcher_locked ? '.48' : '1';
@@ -1377,6 +1414,32 @@ document.addEventListener('visibilitychange', () => {
 });
 
 window.addEventListener('pywebviewready', initUI);
+
+if ($('btnSaveTrayWhitelist')) {
+  const pushWhitelist = (val) => {
+    const a = api(); if (!a || !a.set_tray_whitelist) return;
+    setBusy(true);
+    a.set_tray_whitelist(val).then(r => {
+      setBusy(false);
+      if ($('txtTrayWhitelist') && typeof r.tray_whitelist === 'string') {
+        $('txtTrayWhitelist').value = r.tray_whitelist;
+      }
+      toast((r && r.message) || '已儲存通知列白名單', !(r && r.ok === false), 6000);
+      refreshStatus();
+      setTimeout(refreshStatus, 800);
+    }).catch(e => { setBusy(false); toast('儲存白名單失敗：' + e, false, 6000); });
+  };
+  const appendToken = (tok) => {
+    const el = $('txtTrayWhitelist'); if (!el) return;
+    const parts = el.value.split(/[;\n,]+/).map(x => x.trim()).filter(Boolean);
+    if (!parts.some(x => x.toLowerCase() === tok.toLowerCase())) parts.push(tok);
+    el.value = parts.join(';');
+  };
+  $('btnSaveTrayWhitelist').addEventListener('click', () => pushWhitelist($('txtTrayWhitelist') ? $('txtTrayWhitelist').value : ''));
+  if ($('btnWlAddHwinfo')) $('btnWlAddHwinfo').addEventListener('click', () => { appendToken('HWiNFO64.exe'); appendToken('HWiNFO32.exe'); appendToken('HWiNFO'); });
+  if ($('btnWlAddAida')) $('btnWlAddAida').addEventListener('click', () => appendToken('aida64.exe'));
+  if ($('btnWlReset')) $('btnWlReset').addEventListener('click', () => pushWhitelist('HWiNFO64.exe;HWiNFO32.exe;HWiNFO'));
+}
 
 // 保險：若 pywebviewready 已在腳本註冊前觸發
 

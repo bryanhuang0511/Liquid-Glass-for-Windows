@@ -317,11 +317,37 @@ def clamp_params(scope: str, params: Any) -> dict[str, float]:
     return out
 
 
+DEFAULT_TRAY_WHITELIST = "HWiNFO64.exe;HWiNFO32.exe;HWiNFO"
+
+
+def normalize_tray_whitelist(raw: Any) -> str:
+    """正規化通知列白名單（分號／逗號／換行分隔，去重保留順序）；None 時回傳預設值。"""
+    if raw is None:
+        return DEFAULT_TRAY_WHITELIST
+    if isinstance(raw, (list, tuple)):
+        chunks = [str(x) for x in raw]
+    else:
+        chunks = str(raw).replace("\r", "\n").replace(",", ";").replace("\n", ";").split(";")
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for part in chunks:
+        tok = part.strip()
+        if not tok:
+            continue
+        low = tok.casefold()
+        if low in seen:
+            continue
+        seen.add(low)
+        cleaned.append(tok)
+    return ";".join(cleaned)[:1024]
+
+
 def default_config() -> dict[str, Any]:
     """回傳完整且合法的初始設定字典。"""
     cfg: dict[str, Any] = {"version": VERSION}
     for scope in SCOPES:
         cfg[scope] = default_params(scope)
+    cfg["tray_whitelist"] = DEFAULT_TRAY_WHITELIST
     cfg["watcher"] = default_watcher()
     cfg["lifecycle"] = default_lifecycle()
     return cfg
@@ -341,6 +367,8 @@ def migrate_config(raw: Any) -> dict[str, Any]:
     if not any(isinstance(raw.get(scope), dict) for scope in SCOPES):
         if any(k in raw for k in ("line_strength", "glow_amount", "film_opacity")):
             cfg["desktop"] = default_params("desktop")
+    if "tray_whitelist" in raw:
+        cfg["tray_whitelist"] = normalize_tray_whitelist(raw["tray_whitelist"])
     if "watcher" in raw:
         cfg["watcher"] = clamp_watcher(raw["watcher"])
     if "lifecycle" in raw:

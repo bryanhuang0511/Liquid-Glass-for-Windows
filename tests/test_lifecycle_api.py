@@ -320,7 +320,7 @@ def test_lifecycle_config_and_restore_on_exit(env, monkeypatch):
 
     with open(RT.UI_HTML_PATH, "r", encoding="utf-8") as handle:
         html = handle.read()
-    for token in ("swExitOnClose", "swRestoreOnExit", "set_exit_on_close", "set_restore_on_exit"):
+    for token in ("swExitOnClose", "swRestoreOnExit", "set_exit_on_close", "set_restore_on_exit", "trayWhitelistCard", "txtTrayWhitelist", "set_tray_whitelist", "btnSaveTrayWhitelist"):
         assert token in html
 
     SM.run_batch("apply", ["desktop", "startmenu", "taskbar"], S.default_config())
@@ -399,4 +399,24 @@ def test_cli_version_and_self_check(env, capsys):
     report = json.loads(capsys.readouterr().out)
     assert report["version"] == S.VERSION
     assert all(report[k] is True for k in ("ui_html", "app_ico", "app_png", "taskbar_mod_cpp", "startmenu_mod_cpp", "tray_mod_cpp"))
+
+
+def test_tray_whitelist_api_syncs_and_persists(env):
+    populate(env)
+    app = TC.LiquidGlassApp()
+    api = WA.LiquidGlassApi(app)
+    assert api.get_state()["tray_whitelist"] == S.DEFAULT_TRAY_WHITELIST
+
+    r_apply = api.apply_scope("tray", S.default_params("tray"))
+    assert r_apply["ok"] is True
+    assert WB.get_status(scope="tray")["ini_settings"]["WhitelistApps"] == S.DEFAULT_TRAY_WHITELIST
+
+    r_wl = api.set_tray_whitelist("HWiNFO64.exe, HWiNFO\nCustomApp.exe")
+    assert r_wl["ok"] is True and r_wl["synced"] is True
+    assert r_wl["tray_whitelist"] == "HWiNFO64.exe;HWiNFO;CustomApp.exe"
+    assert WB.get_status(scope="tray")["ini_settings"]["WhitelistApps"] == "HWiNFO64.exe;HWiNFO;CustomApp.exe"
+    assert api.save_params("tray", {"opacity": 0.9, "frost": 1.0, "glow": 1.0, "dark_protect": 1.0}) is True
+    assert WB.get_status(scope="tray")["ini_settings"]["WhitelistApps"] == "HWiNFO64.exe;HWiNFO;CustomApp.exe"
+    saved = json.load(open(RT.CONFIG_PATH, encoding="utf-8"))
+    assert saved["tray_whitelist"] == "HWiNFO64.exe;HWiNFO;CustomApp.exe"
 

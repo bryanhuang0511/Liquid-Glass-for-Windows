@@ -32,6 +32,8 @@ without mutating on-disk shortcuts or colliding with layout/spacing mods.
   $name: Rim & Seam Glow (%)
 - DarkProtect: 100
   $name: Dark Logo Floor Protection (%)
+- WhitelistApps: HWiNFO64.exe;HWiNFO32.exe;HWiNFO
+  $name: Excluded Apps Whitelist (Keep Original Colors)
 */
 // ==/WindhawkModSettings==
 
@@ -50,6 +52,7 @@ without mutating on-disk shortcuts or colliding with layout/spacing mods.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cwctype>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -61,6 +64,7 @@ without mutating on-disk shortcuts or colliding with layout/spacing mods.
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.UI.Core.h>
+#include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
@@ -72,6 +76,7 @@ namespace wgi = winrt::Windows::Graphics::Imaging;
 namespace wss = winrt::Windows::Storage::Streams;
 namespace wuc = winrt::Windows::UI::Core;
 namespace wux = winrt::Windows::UI::Xaml;
+namespace wuxa = winrt::Windows::UI::Xaml::Automation;
 namespace wuxc = winrt::Windows::UI::Xaml::Controls;
 namespace wuxm = winrt::Windows::UI::Xaml::Media;
 namespace wuxmi = winrt::Windows::UI::Xaml::Media::Imaging;
@@ -83,6 +88,7 @@ constexpr size_t kMaxCacheBytes = 12ull * 1024ull * 1024ull;
 constexpr size_t kMaxImgRecords = 512;
 constexpr int kMaxConcurrentRtb = 4;
 constexpr int kWorkSize = 256;
+constexpr int kMaxInputBitmapPx = 1024;
 constexpr double kPi = 3.14159265358979323846;
 
 struct OpticalSettings {
@@ -92,6 +98,7 @@ struct OpticalSettings {
     int glowPct = 100;
     int darkProtectPct = 100;
     uint32_t generation = 1;
+    std::wstring whitelistRaw = L"HWiNFO64.exe;HWiNFO32.exe;HWiNFO";
 };
 
 struct RawImage {
@@ -139,10 +146,20 @@ struct TrayImgRecord {
     uint64_t origHash = 0;
     uint32_t appliedGeneration = 0;
     uint32_t captureAttemptedGen = 0;
+    uint32_t whitelistCheckedGen = 0;
+    winrt::guid iconGuid{};
+    bool hasIconGuid = false;
+    bool isWhitelisted = false;
     bool captureInFlight = false;
     bool callbacksAttached = false;
     int64_t propToken = 0;
     winrt::event_token unloadedToken{};
+};
+
+struct WhitelistRule {
+    std::wstring rawLower;
+    std::wstring stemLower;
+    std::wstring alnumLower;
 };
 
 struct PendingRtbOp {
@@ -190,11 +207,26 @@ std::atomic<uint64_t> g_xamlRootCalls{0};
 std::atomic<uint64_t> g_ovInitCalls{0};
 std::atomic<uint64_t> g_ovShowCalls{0};
 std::atomic<uint64_t> g_ovUpdateCalls{0};
+std::atomic<uint64_t> g_whitelistSkips{0};
+std::atomic<uint64_t> g_appResolvedCount{0};
 std::atomic<bool> g_systemTrayFound{false};
 std::atomic<bool> g_overflowFound{false};
 std::atomic<uint64_t> g_lastStatusFlushTick{0};
 std::wstring g_statusPath;
 std::mutex g_statusMutex;
+
+std::mutex g_whitelistMutex;
+std::vector<WhitelistRule> g_whitelistRules;
+std::vector<std::wstring> g_regWhitelistedTooltips;
+uint64_t g_lastRegScanTick = 0;
+
+void* g_pIidIconView = nullptr;
+void* g_pIidIconViewModel = nullptr;
+void* g_pIidIconConfiguration = nullptr;
+void* g_pIidNotifAreaDataModel = nullptr;
+void* g_pIidNotifAreaIcon6 = nullptr;
+void* g_pIidIconContentView = nullptr;
+void* g_pIidIconContentViewModel = nullptr;
 
 thread_local bool t_inOurSourceOverride = false;
 
@@ -289,7 +321,7 @@ void FlushStatusFile(bool force) {
         snap = g_settings;
     }
 
-    char json[1024];
+    char json[1280];
     int len = _snprintf_s(
         json, sizeof(json), _TRUNCATE,
         "{\"active\":%s,\"unloading\":%s,\"pid\":%lu,\"generation\":%u,"
@@ -299,6 +331,7 @@ void FlushStatusFile(bool force) {
         "\"measure_calls\":%llu,\"arrange_calls\":%llu,\"overflow_calls\":%llu,\"nudge_calls\":%llu,"
         "\"vm_put_calls\":%llu,\"rtb_queued\":%llu,\"rtb_ok\":%llu,\"rtb_fail\":%llu,"
         "\"xaml_root_calls\":%llu,\"overflow_init_calls\":%llu,\"overflow_show_calls\":%llu,\"overflow_update_calls\":%llu,"
+        "\"whitelist_skips\":%llu,\"app_resolved_count\":%llu,"
         "\"system_tray_found\":%s,\"overflow_found\":%s,"
         "\"pending_async\":%d,\"hook_ok\":%s,"
         "\"opacity\":%d,\"frost\":%d,\"glow\":%d,\"dark_protect\":%d}",
@@ -324,6 +357,8 @@ void FlushStatusFile(bool force) {
         static_cast<unsigned long long>(g_ovInitCalls.load()),
         static_cast<unsigned long long>(g_ovShowCalls.load()),
         static_cast<unsigned long long>(g_ovUpdateCalls.load()),
+        static_cast<unsigned long long>(g_whitelistSkips.load()),
+        static_cast<unsigned long long>(g_appResolvedCount.load()),
         g_systemTrayFound.load() ? "true" : "false",
         g_overflowFound.load() ? "true" : "false",
         g_pendingAsyncOps.load(),
@@ -344,6 +379,151 @@ void FlushStatusFile(bool force) {
     }
 }
 
+bool IsReadableMemory(const void* ptr, size_t bytes) noexcept;
+
+std::wstring ToLowerW(std::wstring s) {
+    for (wchar_t& ch : s) {
+        ch = static_cast<wchar_t>(std::towlower(ch));
+    }
+    return s;
+}
+
+std::wstring TrimW(std::wstring s) {
+    while (!s.empty() && std::iswspace(s.front())) s.erase(s.begin());
+    while (!s.empty() && std::iswspace(s.back())) s.pop_back();
+    return s;
+}
+
+std::wstring StripNonAlnumLower(const std::wstring& s) {
+    std::wstring out;
+    out.reserve(s.size());
+    for (wchar_t ch : s) {
+        if (std::iswalnum(ch)) {
+            out.push_back(static_cast<wchar_t>(std::towlower(ch)));
+        }
+    }
+    return out;
+}
+
+std::wstring FirstLineTrimmedW(const std::wstring& s) {
+    size_t pos = s.find_first_of(L"\r\n");
+    std::wstring head = (pos == std::wstring::npos) ? s : s.substr(0, pos);
+    return TrimW(std::move(head));
+}
+
+std::wstring BasenameLowerW(const std::wstring& path) {
+    size_t slash = path.find_last_of(L"\\/");
+    std::wstring fn = (slash == std::wstring::npos) ? path : path.substr(slash + 1);
+    return ToLowerW(TrimW(std::move(fn)));
+}
+
+bool CandidateMatchesRules(const std::wstring& candidate, const std::vector<WhitelistRule>& rules) {
+    if (candidate.empty() || rules.empty()) return false;
+    std::wstring candLower = ToLowerW(TrimW(candidate));
+    if (candLower.empty()) return false;
+    std::wstring candAlnum = StripNonAlnumLower(candLower);
+    for (const auto& rule : rules) {
+        if (!rule.rawLower.empty() && candLower.find(rule.rawLower) != std::wstring::npos) {
+            return true;
+        }
+        if (rule.stemLower.size() >= 3 && candLower.find(rule.stemLower) != std::wstring::npos) {
+            return true;
+        }
+        if (rule.alnumLower.size() >= 4 && !candAlnum.empty() &&
+            candAlnum.find(rule.alnumLower) != std::wstring::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<WhitelistRule> ParseWhitelistRules(const std::wstring& raw) {
+    std::vector<WhitelistRule> out;
+    std::wstring cur;
+    auto flushToken = [&]() {
+        std::wstring tok = ToLowerW(TrimW(cur));
+        cur.clear();
+        if (tok.empty()) return;
+        WhitelistRule rule;
+        rule.rawLower = tok;
+        rule.stemLower = tok;
+        if (rule.stemLower.size() > 4 && rule.stemLower.compare(rule.stemLower.size() - 4, 4, L".exe") == 0) {
+            rule.stemLower.resize(rule.stemLower.size() - 4);
+        }
+        rule.alnumLower = StripNonAlnumLower(rule.stemLower);
+        out.push_back(std::move(rule));
+    };
+    for (wchar_t ch : raw) {
+        if (ch == L';' || ch == L',' || ch == L'\n' || ch == L'\r') {
+            flushToken();
+        } else {
+            cur.push_back(ch);
+        }
+    }
+    flushToken();
+    return out;
+}
+
+void RefreshRegistryWhitelistTooltipsLocked(bool force) {
+    uint64_t now = GetTickCount64();
+    if (!force && g_lastRegScanTick != 0 && (now - g_lastRegScanTick) < 5000) {
+        return;
+    }
+    g_lastRegScanTick = now;
+    g_regWhitelistedTooltips.clear();
+    if (g_whitelistRules.empty()) return;
+
+    HKEY hRoot = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\NotifyIconSettings", 0, KEY_READ, &hRoot) != ERROR_SUCCESS) {
+        return;
+    }
+    wchar_t subName[256];
+    for (DWORD idx = 0;; ++idx) {
+        DWORD subLen = ARRAYSIZE(subName);
+        LONG er = RegEnumKeyExW(hRoot, idx, subName, &subLen, nullptr, nullptr, nullptr, nullptr);
+        if (er == ERROR_NO_MORE_ITEMS) break;
+        if (er != ERROR_SUCCESS) continue;
+
+        HKEY hSub = nullptr;
+        if (RegOpenKeyExW(hRoot, subName, 0, KEY_READ, &hSub) != ERROR_SUCCESS) continue;
+
+        auto readRegStr = [&](const wchar_t* valName) -> std::wstring {
+            DWORD type = 0, cb = 0;
+            if (RegQueryValueExW(hSub, valName, nullptr, &type, nullptr, &cb) != ERROR_SUCCESS ||
+                (type != REG_SZ && type != REG_EXPAND_SZ) || cb < sizeof(wchar_t) || cb > 32768) {
+                return {};
+            }
+            std::wstring buf(cb / sizeof(wchar_t), L'\0');
+            if (RegQueryValueExW(hSub, valName, nullptr, &type, reinterpret_cast<LPBYTE>(buf.data()), &cb) != ERROR_SUCCESS) {
+                return {};
+            }
+            while (!buf.empty() && buf.back() == L'\0') buf.pop_back();
+            return buf;
+        };
+
+        std::wstring exePath = readRegStr(L"ExecutablePath");
+        std::wstring exeName = BasenameLowerW(exePath);
+        if (CandidateMatchesRules(exePath, g_whitelistRules) || CandidateMatchesRules(exeName, g_whitelistRules)) {
+            std::wstring tip = TrimW(readRegStr(L"InitialTooltip"));
+            if (!tip.empty()) {
+                std::wstring fullLow = ToLowerW(tip);
+                if (std::find(g_regWhitelistedTooltips.begin(), g_regWhitelistedTooltips.end(), fullLow) ==
+                    g_regWhitelistedTooltips.end()) {
+                    g_regWhitelistedTooltips.push_back(fullLow);
+                }
+                std::wstring firstLow = ToLowerW(FirstLineTrimmedW(tip));
+                if (firstLow.size() >= 2 &&
+                    std::find(g_regWhitelistedTooltips.begin(), g_regWhitelistedTooltips.end(), firstLow) ==
+                        g_regWhitelistedTooltips.end()) {
+                    g_regWhitelistedTooltips.push_back(firstLow);
+                }
+            }
+        }
+        RegCloseKey(hSub);
+    }
+    RegCloseKey(hRoot);
+}
+
 void LoadSettings() {
     OpticalSettings next;
     next.enabled = Wh_GetIntSetting(L"Enabled") != 0;
@@ -351,13 +531,26 @@ void LoadSettings() {
     next.frostPct = std::clamp(Wh_GetIntSetting(L"Frost"), 20, 130);
     next.glowPct = std::clamp(Wh_GetIntSetting(L"Glow"), 30, 180);
     next.darkProtectPct = std::clamp(Wh_GetIntSetting(L"DarkProtect"), 50, 200);
+    if (PCWSTR rawWl = Wh_GetStringSetting(L"WhitelistApps")) {
+        next.whitelistRaw = rawWl;
+        Wh_FreeStringSetting(rawWl);
+    } else {
+        next.whitelistRaw = L"HWiNFO64.exe;HWiNFO32.exe;HWiNFO";
+    }
+
+    {
+        std::lock_guard<std::mutex> wlLock(g_whitelistMutex);
+        g_whitelistRules = ParseWhitelistRules(next.whitelistRaw);
+        RefreshRegistryWhitelistTooltipsLocked(true);
+    }
 
     std::lock_guard<std::mutex> lock(g_stateMutex);
     bool changed = (next.enabled != g_settings.enabled ||
                     next.opacityPct != g_settings.opacityPct ||
                     next.frostPct != g_settings.frostPct ||
                     next.glowPct != g_settings.glowPct ||
-                    next.darkProtectPct != g_settings.darkProtectPct);
+                    next.darkProtectPct != g_settings.darkProtectPct ||
+                    next.whitelistRaw != g_settings.whitelistRaw);
     next.generation = g_settings.generation + (changed ? 1u : 0u);
     g_settings = next;
     g_settingsGeneration.store(next.generation, std::memory_order_release);
@@ -817,8 +1010,48 @@ void PremulBytesToStraight(const BYTE* src, uint32_t w, uint32_t h, RawImage& ou
     }
 }
 
+bool DownsampleStraightImageIfNeeded(RawImage& img, uint32_t maxDim) {
+    if (img.width <= maxDim && img.height <= maxDim) return true;
+    if (img.width == 0 || img.height == 0 || img.bgra.empty()) return false;
+    int sw = static_cast<int>(img.width);
+    int sh = static_cast<int>(img.height);
+    double scale = std::min(static_cast<double>(maxDim) / sw, static_cast<double>(maxDim) / sh);
+    int dw = std::max(8, static_cast<int>(std::lround(sw * scale)));
+    int dh = std::max(8, static_cast<int>(std::lround(sh * scale)));
+    size_t srcN = static_cast<size_t>(sw) * sh;
+    std::vector<float> sR(srcN), sG(srcN), sB(srcN), sA(srcN);
+    for (size_t i = 0; i < srcN; ++i) {
+        float a = img.bgra[i * 4 + 3] / 255.0f;
+        sB[i] = (img.bgra[i * 4 + 0] / 255.0f) * a;
+        sG[i] = (img.bgra[i * 4 + 1] / 255.0f) * a;
+        sR[i] = (img.bgra[i * 4 + 2] / 255.0f) * a;
+        sA[i] = a;
+    }
+    std::vector<float> dR, dG, dB, dA;
+    PremultipliedResizeFloat(sR.data(), sG.data(), sB.data(), sA.data(), sw, sh, dR, dG, dB, dA, dw, dh, true);
+    size_t dstN = static_cast<size_t>(dw) * dh;
+    img.width = static_cast<uint32_t>(dw);
+    img.height = static_cast<uint32_t>(dh);
+    img.bgra.resize(dstN * 4);
+    for (size_t i = 0; i < dstN; ++i) {
+        float oa = Clamp01(dA[i]);
+        if (oa <= 1e-4f) {
+            img.bgra[i * 4 + 0] = 0;
+            img.bgra[i * 4 + 1] = 0;
+            img.bgra[i * 4 + 2] = 0;
+            img.bgra[i * 4 + 3] = 0;
+        } else {
+            img.bgra[i * 4 + 0] = static_cast<uint8_t>(std::min(255.0f, Clamp01(dB[i] / oa) * 255.0f + 0.5f));
+            img.bgra[i * 4 + 1] = static_cast<uint8_t>(std::min(255.0f, Clamp01(dG[i] / oa) * 255.0f + 0.5f));
+            img.bgra[i * 4 + 2] = static_cast<uint8_t>(std::min(255.0f, Clamp01(dR[i] / oa) * 255.0f + 0.5f));
+            img.bgra[i * 4 + 3] = static_cast<uint8_t>(std::min(255.0f, oa * 255.0f + 0.5f));
+        }
+    }
+    return true;
+}
+
 bool ExtractStraightFromBuffer(const wss::IBuffer& buf, uint32_t w, uint32_t h, bool isPremul, RawImage& outStraight) {
-    if (!buf || w == 0 || h == 0 || w > 512 || h > 512) return false;
+    if (!buf || w == 0 || h == 0 || w > kMaxInputBitmapPx || h > kMaxInputBitmapPx) return false;
     static constexpr GUID kIBufferByteAccessIid = {
         0x905a0fef, 0xbc53, 0x11df, {0x8c, 0x49, 0x00, 0x1e, 0x4f, 0xc6, 0x86, 0xda}};
     winrt::com_ptr<::Windows::Storage::Streams::IBufferByteAccess> access;
@@ -841,7 +1074,8 @@ bool ExtractStraightFromBuffer(const wss::IBuffer& buf, uint32_t w, uint32_t h, 
             if (pixels[i] > 0) ++nonZero;
         }
     }
-    return nonZero >= 4;
+    if (nonZero < 4) return false;
+    return DownsampleStraightImageIfNeeded(outStraight, kWorkSize);
 }
 
 wgi::SoftwareBitmap MakePremulSoftwareBitmap(const RawImage& premul) {
@@ -1117,7 +1351,7 @@ void BeginSafeRtbCaptureOnUiThread(const wuxc::Image& img, void* imgKey, uint32_
             std::lock_guard<std::mutex> lk(g_keepMutex);
             g_keepRtbOps.push_back(op);
         }
-        op->renderOp = rtb.RenderAsync(img);
+        op->renderOp = rtb.RenderAsync(img, 128, 0);
         op->renderOp.Completed([weakImg = winrt::make_weak(img), imgKey, curKey, targetGen, rtb, op](
                                    wf::IAsyncAction const& act, wf::AsyncStatus status) {
             auto releaseRtb = [&]() {
@@ -1142,7 +1376,7 @@ void BeginSafeRtbCaptureOnUiThread(const wuxc::Image& img, void* imgKey, uint32_
                 act.GetResults();
                 uint32_t pw = static_cast<uint32_t>(std::max(0, rtb.PixelWidth()));
                 uint32_t ph = static_cast<uint32_t>(std::max(0, rtb.PixelHeight()));
-                if (pw == 0 || ph == 0 || pw > 256 || ph > 256) {
+                if (pw == 0 || ph == 0 || pw > kMaxInputBitmapPx || ph > kMaxInputBitmapPx) {
                     g_rtbFail.fetch_add(1, std::memory_order_relaxed);
                     clearInFlight();
                     releaseRtb();
@@ -1258,6 +1492,253 @@ void EnsureImageTrackedOnUiThread(const wuxc::Image& img, void* imgKey) {
     }
 }
 
+bool QueryComByGuidPtr(IUnknown* unk, const void* pGuidPtr, winrt::com_ptr<IUnknown>& out) noexcept {
+    out = nullptr;
+    if (!unk || !IsReadableMemory(pGuidPtr, sizeof(GUID)) || !IsReadableMemory(unk, sizeof(void*))) {
+        return false;
+    }
+    void* vtbl = *reinterpret_cast<void* const*>(unk);
+    if (!IsReadableMemory(vtbl, 3 * sizeof(void*))) return false;
+    const GUID& iid = *reinterpret_cast<const GUID*>(pGuidPtr);
+    return SUCCEEDED(unk->QueryInterface(iid, reinterpret_cast<void**>(out.put()))) && out;
+}
+
+bool InvokeSlotGetObject(IUnknown* obj, size_t slotIdx, winrt::com_ptr<IUnknown>& out) noexcept {
+    out = nullptr;
+    if (!obj || !IsReadableMemory(obj, sizeof(void*))) return false;
+    void* const* vtbl = *reinterpret_cast<void* const* const*>(obj);
+    if (!IsReadableMemory(vtbl, (slotIdx + 1) * sizeof(void*)) || !vtbl[slotIdx]) return false;
+    using Getter_t = HRESULT(WINAPI*)(void*, void**);
+    auto fn = reinterpret_cast<Getter_t>(vtbl[slotIdx]);
+    void* raw = nullptr;
+    if (FAILED(fn(obj, &raw)) || !raw) return false;
+    out.attach(reinterpret_cast<IUnknown*>(raw));
+    return true;
+}
+
+bool InvokeSlotGetHString(IUnknown* obj, size_t slotIdx, std::wstring& out) noexcept {
+    if (!obj || !IsReadableMemory(obj, sizeof(void*))) return false;
+    void* const* vtbl = *reinterpret_cast<void* const* const*>(obj);
+    if (!IsReadableMemory(vtbl, (slotIdx + 1) * sizeof(void*)) || !vtbl[slotIdx]) return false;
+    using Getter_t = HRESULT(WINAPI*)(void*, void**);
+    auto fn = reinterpret_cast<Getter_t>(vtbl[slotIdx]);
+    void* rawHstr = nullptr;
+    if (FAILED(fn(obj, &rawHstr)) || !rawHstr) return false;
+    winrt::hstring owned{rawHstr, winrt::take_ownership_from_abi};
+    out.assign(owned.c_str(), owned.size());
+    return !out.empty();
+}
+
+bool InvokeSlotGetGuid(IUnknown* obj, size_t slotIdx, winrt::guid& out) noexcept {
+    if (!obj || !IsReadableMemory(obj, sizeof(void*))) return false;
+    void* const* vtbl = *reinterpret_cast<void* const* const*>(obj);
+    if (!IsReadableMemory(vtbl, (slotIdx + 1) * sizeof(void*)) || !vtbl[slotIdx]) return false;
+    using Getter_t = HRESULT(WINAPI*)(void*, winrt::guid*);
+    auto fn = reinterpret_cast<Getter_t>(vtbl[slotIdx]);
+    return SUCCEEDED(fn(obj, &out));
+}
+
+void FindTrayOwnerAncestors(const wuxc::Image& img,
+                            wux::FrameworkElement& outNotifyView,
+                            wux::FrameworkElement& outContentView) {
+    outNotifyView = nullptr;
+    outContentView = nullptr;
+    try {
+        wux::DependencyObject cur = img;
+        for (int depth = 0; depth < 12 && cur; ++depth) {
+            auto cls = winrt::get_class_name(cur);
+            if (!outContentView && cls == L"SystemTray.ImageIconContent") {
+                outContentView = cur.try_as<wux::FrameworkElement>();
+            }
+            if (cls == L"SystemTray.NotifyIconView") {
+                outNotifyView = cur.try_as<wux::FrameworkElement>();
+                break;
+            }
+            cur = wuxm::VisualTreeHelper::GetParent(cur);
+        }
+    } catch (...) {
+    }
+}
+
+std::wstring ExtractTooltipControlString(const wux::DependencyObject& obj) {
+    if (!obj) return {};
+    try {
+        if (auto raw = wuxc::ToolTipService::GetToolTip(obj)) {
+            if (auto s = winrt::unbox_value_or<winrt::hstring>(raw, L""); !s.empty()) {
+                return std::wstring(s.c_str(), s.size());
+            }
+            if (auto tt = raw.try_as<wuxc::ToolTip>()) {
+                auto content = tt.Content();
+                if (auto s = winrt::unbox_value_or<winrt::hstring>(content, L""); !s.empty()) {
+                    return std::wstring(s.c_str(), s.size());
+                }
+                if (auto tb = content.try_as<wuxc::TextBlock>()) {
+                    auto t = tb.Text();
+                    return std::wstring(t.c_str(), t.size());
+                }
+            }
+        }
+    } catch (...) {
+    }
+    return {};
+}
+
+bool MatchesRegistryTooltipLocked(const std::wstring& candidate) {
+    if (candidate.empty() || g_regWhitelistedTooltips.empty()) return false;
+    std::wstring low = ToLowerW(TrimW(candidate));
+    std::wstring first = ToLowerW(FirstLineTrimmedW(candidate));
+    for (const auto& r : g_regWhitelistedTooltips) {
+        if (!low.empty() && low == r) return true;
+        if (!first.empty() && first == r) return true;
+    }
+    return false;
+}
+
+bool IsImageWhitelistedOnUiThread(const wuxc::Image& img, void* imgKey, uint32_t targetGen) {
+    {
+        std::lock_guard<std::mutex> wlLock(g_whitelistMutex);
+        if (g_whitelistRules.empty()) {
+            std::lock_guard<std::mutex> stLock(g_stateMutex);
+            auto it = g_imgMap.find(imgKey);
+            if (it != g_imgMap.end()) {
+                it->second.whitelistCheckedGen = targetGen;
+                it->second.isWhitelisted = false;
+            }
+            return false;
+        }
+    }
+
+    wux::FrameworkElement feNotify{nullptr};
+    wux::FrameworkElement feContent{nullptr};
+    FindTrayOwnerAncestors(img, feNotify, feContent);
+
+    winrt::com_ptr<IUnknown> spIconView;
+    winrt::com_ptr<IUnknown> spIconVm;
+    winrt::com_ptr<IUnknown> spIconCfg;
+    winrt::com_ptr<IUnknown> spDataModel;
+    winrt::com_ptr<IUnknown> spUdkIcon;
+    winrt::com_ptr<IUnknown> spContentView;
+    winrt::com_ptr<IUnknown> spContentVm;
+
+    winrt::guid curGuid{};
+    bool gotGuid = false;
+
+    try {
+        if (feNotify && QueryComByGuidPtr(reinterpret_cast<IUnknown*>(winrt::get_abi(feNotify)), g_pIidIconView, spIconView)) {
+            if (InvokeSlotGetObject(spIconView.get(), 10, spIconVm)) {
+                winrt::com_ptr<IUnknown> spIfaceVm;
+                if (QueryComByGuidPtr(spIconVm.get(), g_pIidIconViewModel, spIfaceVm)) {
+                    spIconVm = spIfaceVm;
+                    winrt::com_ptr<IUnknown> rawCfg;
+                    if (InvokeSlotGetObject(spIconVm.get(), 6, rawCfg)) {
+                        QueryComByGuidPtr(rawCfg.get(), g_pIidIconConfiguration, spIconCfg);
+                    }
+                    winrt::com_ptr<IUnknown> rawCvm;
+                    if (InvokeSlotGetObject(spIconVm.get(), 22, rawCvm)) {
+                        QueryComByGuidPtr(rawCvm.get(), g_pIidIconContentViewModel, spContentVm);
+                    }
+                }
+            }
+        }
+        if (!spContentVm && feContent &&
+            QueryComByGuidPtr(reinterpret_cast<IUnknown*>(winrt::get_abi(feContent)), g_pIidIconContentView, spContentView)) {
+            winrt::com_ptr<IUnknown> rawCvm;
+            if (InvokeSlotGetObject(spContentView.get(), 6, rawCvm)) {
+                QueryComByGuidPtr(rawCvm.get(), g_pIidIconContentViewModel, spContentVm);
+            }
+        }
+        if (spIconCfg) {
+            gotGuid = InvokeSlotGetGuid(spIconCfg.get(), 9, curGuid);
+        }
+        if (!gotGuid && spContentVm) {
+            gotGuid = InvokeSlotGetGuid(spContentVm.get(), 6, curGuid);
+        }
+    } catch (...) {
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        auto it = g_imgMap.find(imgKey);
+        if (it != g_imgMap.end() && it->second.whitelistCheckedGen == targetGen) {
+            bool sameSlot = (!gotGuid && !it->second.hasIconGuid) ||
+                            (gotGuid && it->second.hasIconGuid &&
+                             std::memcmp(&curGuid, &it->second.iconGuid, sizeof(winrt::guid)) == 0);
+            if (sameSlot) {
+                return it->second.isWhitelisted;
+            }
+        }
+    }
+
+    std::wstring appName;
+    std::wstring tipText;
+    std::wstring autoName;
+    try {
+        if (spIconCfg) {
+            winrt::com_ptr<IUnknown> rawDm;
+            if (InvokeSlotGetObject(spIconCfg.get(), 6, rawDm) &&
+                QueryComByGuidPtr(rawDm.get(), g_pIidNotifAreaDataModel, spDataModel)) {
+                winrt::com_ptr<IUnknown> rawUdk;
+                if (InvokeSlotGetObject(spDataModel.get(), 6, rawUdk) &&
+                    QueryComByGuidPtr(rawUdk.get(), g_pIidNotifAreaIcon6, spUdkIcon)) {
+                    if (InvokeSlotGetHString(spUdkIcon.get(), 6, appName)) {
+                        g_appResolvedCount.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+            }
+        }
+        if (spContentVm) {
+            InvokeSlotGetHString(spContentVm.get(), 7, tipText);
+            InvokeSlotGetHString(spContentVm.get(), 9, autoName);
+        }
+        if (feNotify) {
+            if (autoName.empty()) {
+                auto a = wuxa::AutomationProperties::GetName(feNotify);
+                if (!a.empty()) autoName.assign(a.c_str(), a.size());
+            }
+            if (tipText.empty()) tipText = ExtractTooltipControlString(feNotify);
+        }
+        if (feContent) {
+            if (autoName.empty()) {
+                auto a = wuxa::AutomationProperties::GetName(feContent);
+                if (!a.empty()) autoName.assign(a.c_str(), a.size());
+            }
+            if (tipText.empty()) tipText = ExtractTooltipControlString(feContent);
+        }
+    } catch (...) {
+    }
+
+    bool matched = false;
+    {
+        std::lock_guard<std::mutex> wlLock(g_whitelistMutex);
+        if (CandidateMatchesRules(appName, g_whitelistRules) ||
+            CandidateMatchesRules(tipText, g_whitelistRules) ||
+            CandidateMatchesRules(autoName, g_whitelistRules)) {
+            matched = true;
+        } else {
+            if (MatchesRegistryTooltipLocked(tipText) || MatchesRegistryTooltipLocked(autoName)) {
+                matched = true;
+            } else {
+                RefreshRegistryWhitelistTooltipsLocked(false);
+                if (MatchesRegistryTooltipLocked(tipText) || MatchesRegistryTooltipLocked(autoName)) {
+                    matched = true;
+                }
+            }
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        auto it = g_imgMap.find(imgKey);
+        if (it != g_imgMap.end()) {
+            it->second.whitelistCheckedGen = targetGen;
+            it->second.isWhitelisted = matched;
+            it->second.hasIconGuid = gotGuid;
+            if (gotGuid) it->second.iconGuid = curGuid;
+        }
+    }
+    return matched;
+}
+
 void ProcessImageOnUiThread(const wuxc::Image& img, bool allowAsyncCapture) {
     if (!img || g_unloading.load()) return;
     void* imgKey = GetCanonicalInspectable(img);
@@ -1271,6 +1752,12 @@ void ProcessImageOnUiThread(const wuxc::Image& img, bool allowAsyncCapture) {
         cfg = g_settings;
     }
     if (!cfg.enabled) {
+        RestoreImageToOriginalOnUiThread(img, imgKey);
+        return;
+    }
+
+    if (IsImageWhitelistedOnUiThread(img, imgKey, cfg.generation)) {
+        g_whitelistSkips.fetch_add(1, std::memory_order_relaxed);
         RestoreImageToOriginalOnUiThread(img, imgKey);
         return;
     }
@@ -1324,12 +1811,12 @@ void ProcessImageOnUiThread(const wuxc::Image& img, bool allowAsyncCapture) {
         return;
     }
 
-    // Fast Path 1: Synchronous pixel extraction from WriteableBitmap (zero RTB needed).
+    // Fast Path 1: Synchronous pixel extraction from WriteableBitmap (supports up to 1024px & downsamples cleanly).
     if (auto wb = curSrc.try_as<wuxmi::WriteableBitmap>()) {
         try {
             int32_t w = wb.PixelWidth();
             int32_t h = wb.PixelHeight();
-            if (w >= 8 && h >= 8 && w <= 256 && h <= 256) {
+            if (w >= 8 && h >= 8 && w <= kMaxInputBitmapPx && h <= kMaxInputBitmapPx) {
                 RawImage straight;
                 if (ExtractStraightFromBuffer(wb.PixelBuffer(), static_cast<uint32_t>(w), static_cast<uint32_t>(h), true, straight)) {
                     uint64_t hash = Fnv1a64(straight.bgra.data(), straight.bgra.size());
@@ -1342,13 +1829,13 @@ void ProcessImageOnUiThread(const wuxc::Image& img, bool allowAsyncCapture) {
         }
     }
 
-    // Path 2: Safe deferred RenderTargetBitmap capture AFTER MeasureOverride unwinds on Low priority.
+    // Path 2: Safe deferred RenderTargetBitmap capture AFTER MeasureOverride unwinds on Normal priority.
     if (!allowAsyncCapture || alreadyAttemptedGen) return;
     try {
         if (auto disp = img.Dispatcher()) {
             winrt::weak_ref<wuxc::Image> weakImg = winrt::make_weak(img);
             uint32_t gen = cfg.generation;
-            disp.RunAsync(wuc::CoreDispatcherPriority::Low, [weakImg, imgKey, gen]() {
+            disp.RunAsync(wuc::CoreDispatcherPriority::Normal, [weakImg, imgKey, gen]() {
                 if (g_unloading.load()) return;
                 if (auto live = weakImg.get()) {
                     BeginSafeRtbCaptureOnUiThread(live, imgKey, gen);
@@ -1926,6 +2413,69 @@ BOOL Wh_ModInit() {
             {LR"(private: void __cdecl winrt::SystemTray::implementation::SystemTrayController::UpdateNotificationAreaOverflowIcons(void))"},
             &SystemTrayController_UpdateOverflowIcons_Original,
             SystemTrayController_UpdateOverflowIcons_Hook,
+            true,
+        },
+        {
+            {
+                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconView>)",
+                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconView>)",
+            },
+            &g_pIidIconView,
+            nullptr,
+            true,
+        },
+        {
+            {
+                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconViewModel>)",
+                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconViewModel>)",
+            },
+            &g_pIidIconViewModel,
+            nullptr,
+            true,
+        },
+        {
+            {
+                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconConfiguration>)",
+                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconConfiguration>)",
+            },
+            &g_pIidIconConfiguration,
+            nullptr,
+            true,
+        },
+        {
+            {
+                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::INotificationAreaIconsDataModel>)",
+                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::INotificationAreaIconsDataModel>)",
+            },
+            &g_pIidNotifAreaDataModel,
+            nullptr,
+            true,
+        },
+        {
+            {
+                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::WindowsUdk::UI::Shell::INotificationAreaIcon6>)",
+                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::WindowsUdk::UI::Shell::INotificationAreaIcon6>)",
+            },
+            &g_pIidNotifAreaIcon6,
+            nullptr,
+            true,
+        },
+        {
+            {
+                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentView>)",
+                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentView>)",
+            },
+            &g_pIidIconContentView,
+            nullptr,
+            true,
+        },
+        {
+            {
+                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentViewModel>)",
+                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentViewModel>)",
+            },
+            &g_pIidIconContentViewModel,
+            nullptr,
             true,
         },
     };

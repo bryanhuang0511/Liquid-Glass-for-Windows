@@ -938,8 +938,11 @@ def apply_scope(scope: str, params: dict[str, Any], notify: bool = True, sources
         return res
     if scope in WB.MOD_SPECS:
         clamped = S.clamp_params(scope, params)
+        apply_p: dict[str, Any] = dict(clamped)
+        if scope == "tray" and isinstance(params, dict) and "whitelist_apps" in params:
+            apply_p["whitelist_apps"] = params["whitelist_apps"]
         _restore_legacy_windhawk_shortcuts(scope)
-        wb_res = WB.apply_windhawk_mod(scope, clamped, base_dir=RT.BASE_DIR)
+        wb_res = WB.apply_windhawk_mod(scope, apply_p, base_dir=RT.BASE_DIR)
         res = S.new_result(scope, 1)
         res["applied" if wb_res.get("ok") else "failed"] = 1
         if wb_res.get("needs_admin"):
@@ -1103,7 +1106,11 @@ def run_batch(
         out: list[dict[str, Any]] = []
         for sc in scopes:
             if kind == "apply":
-                out.append(apply_scope(sc, config.get(sc, {}), notify=False, sources=sources))
+                sc_params = config.get(sc, {})
+                if sc == "tray" and "tray_whitelist" in config:
+                    sc_params = dict(sc_params)
+                    sc_params["whitelist_apps"] = config["tray_whitelist"]
+                out.append(apply_scope(sc, sc_params, notify=False, sources=sources))
             else:
                 out.append(restore_scope(sc, notify=False, sources=sources))
         if any(r["scope"] not in WB.MOD_SPECS and (r["applied"] or r["restored"]) for r in out):
