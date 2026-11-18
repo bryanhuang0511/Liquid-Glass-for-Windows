@@ -11,11 +11,13 @@
         +---------------+---------------+     +----+---------------------+
         | LiquidGlassForWindows.exe     |     | Windhawk Runtime         |
         | (--settings UI Process)       |     |  - explorer.exe (Taskbar)|
-        |  * PyWebView EdgeChromium     |     |  - StartMenuExperience   |
-        |  * WebApi (preview / config)  |     |  * Config via INI or     |
-        |  * Warm preview worker        |     |    HKLM Registry         |
-        +---------------+---------------+     +----+---------------------+
-                        | IPC: config.json + Local Stop Event + Telemetry JSON
+        |  * PyWebView EdgeChromium     |     |  - explorer.exe (Tray ^) |
+        |  * WebApi (preview / config)  |     |  - StartMenuExperience   |
+        |  * Warm preview worker        |     |  * Config via INI or     |
+        +---------------+---------------+     |    HKLM Registry         |
+                        |                     +----+---------------------+
+                        | IPC: config.json + Same-User-SID Mutex/Stop Event
+                        v
         +---------------+---------------+
         | LiquidGlassForWindows.exe     |
         | (--autostart Tray Process)    |

@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
+  "version": "2.1.0",
   "desktop": {
     "opacity": 1.0,
     "frost": 1.0,
@@ -13,6 +13,12 @@
     "dark_protect": 1.0
   },
   "taskbar": {
+    "opacity": 1.0,
+    "frost": 1.0,
+    "glow": 1.0,
+    "dark_protect": 1.0
+  },
+  "tray": {
     "opacity": 1.0,
     "frost": 1.0,
     "glow": 1.0,

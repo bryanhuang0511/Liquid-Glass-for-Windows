@@ -74,13 +74,17 @@ def test_taskbar_optical_36px_fresnel_and_cutout():
 
 def test_menu_and_desktop_have_expected_structure():
     smp = R.sample_icons()[0]
-    for sc in ("desktop", "startmenu", "taskbar"):
+    for sc in ("desktop", "startmenu", "taskbar", "tray"):
         out = np.asarray(R.render_preview(sc, smp, S.default_params(sc), 256), dtype=np.float32) / 255.0
         assert out.shape == (256, 256, 4)
         assert out[:2, :2, 3].max() == 0.0
         assert out[..., 3].max() <= 0.905
         vis = out[..., 3] > 0.02
         assert out[vis, :3].min() >= 0.92
+    tray_20 = np.asarray(R.render_preview("tray", smp, S.default_params("tray"), 20), dtype=np.float32) / 255.0
+    assert tray_20.shape == (20, 20, 4)
+    assert tray_20[..., 3].max() <= 0.905
+    assert tray_20[tray_20[..., 3] > 0.02, :3].min() >= 0.92
 
 
 def test_startmenu_optical_glass_matches_taskbar():

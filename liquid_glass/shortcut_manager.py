@@ -895,10 +895,15 @@ def _restore_legacy_windhawk_shortcuts(scope: str) -> dict[str, int]:
     return {"restored": restored, "untouched": untouched}
 
 
-def effective_active_scopes(wh_dir: str | None = None) -> list[str]:
-    """回傳本機目前可用的區域；未安裝 Windhawk 時自動退回純桌面核心。"""
+def effective_active_scopes(wh_dir: str | None = None, *, include_experimental: bool = False) -> list[str]:
+    """回傳本機目前可用的區域；未安裝 Windhawk 時自動退回純桌面核心，且預設不含實驗性獨立分頁。"""
     wh_ok = WB.is_windhawk_installed(wh_dir)
-    return [sc for sc in S.ACTIVE_SCOPES if (not S.SPECS[sc].get("requires_windhawk") or wh_ok)]
+    return [
+        sc
+        for sc in S.ACTIVE_SCOPES
+        if (not S.SPECS[sc].get("requires_windhawk") or wh_ok)
+        and (include_experimental or not S.SPECS[sc].get("experimental"))
+    ]
 
 
 def restore_live_scopes_on_exit(wh_dir: str | None = None) -> list[dict[str, Any]]:

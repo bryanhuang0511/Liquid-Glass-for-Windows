@@ -50,6 +50,14 @@ MOD_SPECS = {
         "status_filename": "lgic_windhawk_startmenu_status.json",
         "label": "開始功能表",
     },
+    "tray": {
+        "mod_id": "local@liquid-glass-tray-icons",
+        "version": "1.0.0",
+        "source_rel": ("windhawk", "liquid_glass_tray.wh.cpp"),
+        "include": "explorer.exe",
+        "status_filename": "lgic_windhawk_tray_status.json",
+        "label": "通知列",
+    },
 }
 
 
@@ -648,6 +656,10 @@ def apply_startmenu(params, wh_dir=None, base_dir=None):
     return apply_windhawk_mod("startmenu", params, wh_dir=wh_dir, base_dir=base_dir)
 
 
+def apply_tray(params, wh_dir=None, base_dir=None):
+    return apply_windhawk_mod("tray", params, wh_dir=wh_dir, base_dir=base_dir)
+
+
 def update_settings_if_active(params, wh_dir=None, scope="taskbar"):
     paths = resolve_windhawk_paths(wh_dir, scope=scope)
     ini = read_mod_config(paths, scope=scope)
@@ -697,3 +709,7 @@ def restore_taskbar(params=None, wh_dir=None):
 
 def restore_startmenu(params=None, wh_dir=None):
     return restore_windhawk_mod("startmenu", params=params, wh_dir=wh_dir)
+
+
+def restore_tray(params=None, wh_dir=None):
+    return restore_windhawk_mod("tray", params=params, wh_dir=wh_dir)

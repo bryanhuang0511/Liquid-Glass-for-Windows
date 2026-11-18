@@ -108,7 +108,9 @@
 
   /* 分頁 */
 
-  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+
+  @media (max-width: 640px) { .tabs { grid-template-columns: repeat(2, 1fr); } }
 
   .tab { cursor: pointer; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--edge); background: rgba(255,255,255,0.05);
 
@@ -119,6 +121,14 @@
   .tab.active { background: linear-gradient(145deg, rgba(96,165,250,0.30), rgba(96,165,250,0.12)); border-color: rgba(147,197,253,0.65);
 
     box-shadow: 0 0 0 1px rgba(147,197,253,0.25), 0 6px 18px rgba(59,130,246,0.28); }
+
+  .tab.experimental { border-style: dashed; border-color: rgba(167,139,250,0.42); }
+
+  .tab.experimental.active { border-style: solid; border-color: rgba(196,181,253,0.78);
+
+    background: linear-gradient(145deg, rgba(139,92,246,0.28), rgba(96,165,250,0.14));
+
+    box-shadow: 0 0 0 1px rgba(196,181,253,0.28), 0 6px 18px rgba(139,92,246,0.25); }
 
   .tab.locked { cursor: not-allowed; opacity: 0.42; background: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.06);
 
@@ -394,13 +404,13 @@
 
 <div class="card" style="padding:12px 16px" aria-label="常駐與退出開關">
 
-<div class="card-title" style="margin-bottom:8px"><span>常駐與退出開關</span><span class="note">退出還原僅針對工作列／開始功能表（不改動桌面捷徑）</span></div>
+<div class="card-title" style="margin-bottom:8px"><span>常駐與退出開關</span><span class="note">關閉視窗預設縮小常駐通知區（維持效果、不佔工作列）；僅退出整個程式時套用還原</span></div>
 
 <div class="life-grid">
 
-<div class="life-item" id="exitOnCloseRow"><div class="lbl"><b>關閉視窗直接結束程式</b><small>不留背景系統匣常駐</small></div><label class="switch"><input type="checkbox" id="swExitOnClose"><span class="knob"></span></label></div>
+<div class="life-item" id="exitOnCloseRow"><div class="lbl"><b>關閉視窗直接結束程式</b><small>關閉（預設）時縮小常駐系統匣通知區</small></div><label class="switch"><input type="checkbox" id="swExitOnClose"><span class="knob"></span></label></div>
 
-<div class="life-item" id="restoreOnExitRow"><div class="lbl"><b>退出自動還原即時外觀</b><small>結束程式即回復原廠圖示</small></div><label class="switch"><input type="checkbox" id="swRestoreOnExit"><span class="knob"></span></label></div>
+<div class="life-item" id="restoreOnExitRow"><div class="lbl"><b>完全退出時自動還原即時外觀</b><small>僅從系統匣關閉整個程式時才回復原廠圖示</small></div><label class="switch"><input type="checkbox" id="swRestoreOnExit"><span class="knob"></span></label></div>
 
 </div>
 
@@ -488,13 +498,13 @@
 
 <div class="card">
 
-<div class="card-title"><span>全區批次控制</span><span class="note" id="batchNote">一次套用或還原：工作列、開始功能表、桌面</span></div>
+<div class="card-title"><span>全區批次控制</span><span class="note" id="batchNote">一次套用核心三區：工作列、開始功能表、桌面（通知列為獨立測試分頁）</span></div>
 
 <div class="btns">
 
-<button class="btn primary" id="btnApplyAll" type="button">✨ 一鍵套用全部三區</button>
+<button class="btn primary" id="btnApplyAll" type="button">✨ 一鍵套用核心三區</button>
 
-<button class="btn danger" id="btnRestoreAll" type="button">🛡️ 一鍵還原全部三區</button>
+<button class="btn danger" id="btnRestoreAll" type="button">🛡️ 一鍵還原全部區域</button>
 
 </div>
 
@@ -534,7 +544,7 @@ const $ = id => document.getElementById(id);
 
 const api = () => (window.pywebview && window.pywebview.api) ? window.pywebview.api : null;
 
-const CTX = { desktop: 'ctx-desktop', startmenu: 'ctx-startmenu', taskbar: 'ctx-taskbar' };
+const CTX = { desktop: 'ctx-desktop', startmenu: 'ctx-startmenu', taskbar: 'ctx-taskbar', tray: 'ctx-taskbar' };
 
 let ST = null;            // get_state() 結果
 
@@ -562,9 +572,15 @@ const fmt = v => Number(v).toFixed(2);
 
 // ---------- 建 UI（一次） ----------
 
-const isWhAvailable = () => !!(ST && (ST.windhawk_installed || (ST.taskbar_engine && ST.taskbar_engine.windhawk_installed) || (ST.startmenu_engine && ST.startmenu_engine.windhawk_installed)));
+const isWhAvailable = () => !!(ST && (ST.windhawk_installed || (ST.taskbar_engine && ST.taskbar_engine.windhawk_installed) || (ST.startmenu_engine && ST.startmenu_engine.windhawk_installed) || (ST.tray_engine && ST.tray_engine.windhawk_installed)));
 
 const scopeNeedsWh = id => !!(ST && ST.specs && ST.specs[id] && ST.specs[id].requires_windhawk);
+
+const ENGINE_PROP = { taskbar: 'taskbar_engine', startmenu: 'startmenu_engine', tray: 'tray_engine' };
+
+const engineForScope = id => (ST && ENGINE_PROP[id]) ? ST[ENGINE_PROP[id]] : null;
+
+const setEngineForScope = (id, st) => { if (ST && ENGINE_PROP[id]) ST[ENGINE_PROP[id]] = st; };
 
 function updateBatchUI() {
 
@@ -574,7 +590,7 @@ function updateBatchUI() {
 
     $('batchNote').textContent = whOk
 
-      ? '一次套用或還原：工作列、開始功能表、桌面'
+      ? '一次套用核心三區：工作列、開始功能表、桌面（通知列於第 4 分頁獨立測試，「一鍵還原」會安全一併停用）'
 
       : '未偵測到 Windhawk，批次控制僅執行獨立的「桌面區」';
 
@@ -582,13 +598,13 @@ function updateBatchUI() {
 
   if ($('btnApplyAll')) {
 
-    $('btnApplyAll').textContent = whOk ? '✨ 一鍵套用全部三區' : '✨ 一鍵套用可用區域（桌面）';
+    $('btnApplyAll').textContent = whOk ? '✨ 一鍵套用核心三區' : '✨ 一鍵套用可用區域（桌面）';
 
   }
 
   if ($('btnRestoreAll')) {
 
-    $('btnRestoreAll').textContent = whOk ? '🛡️ 一鍵還原全部三區' : '🛡️ 一鍵還原可用區域（桌面）';
+    $('btnRestoreAll').textContent = whOk ? '🛡️ 一鍵還原全部區域' : '🛡️ 一鍵還原可用區域（桌面）';
 
   }
 
@@ -610,7 +626,7 @@ function updateScopeControls() {
 
   const s = ST.specs[scope];
 
-  const isWh = (scope === 'taskbar' || scope === 'startmenu');
+  const isWh = scopeNeedsWh(scope);
 
   const whMissing = scopeNeedsWh(scope) && !isWhAvailable();
 
@@ -664,7 +680,7 @@ function buildTabs() {
 
     b.type = 'button';
 
-    b.className = 'tab' + (locked ? ' locked' : (optOff ? ' optional-off' : '')) + (id === scope ? ' active' : '');
+    b.className = 'tab' + (locked ? ' locked' : (optOff ? ' optional-off' : '')) + (s.experimental ? ' experimental' : '') + (id === scope ? ' active' : '');
 
     b.dataset.scope = id;
 
@@ -678,7 +694,7 @@ function buildTabs() {
 
     } else {
 
-      const subText = optOff ? '🔌 Windhawk 選用擴充（未安裝）' : s.style;
+      const subText = optOff ? '🔌 Windhawk 選用擴充（未安裝）' : (s.experimental ? '🧪 獨立測試（選用擴充）' : s.style);
 
       b.innerHTML = `<b>${s.icon} ${s.label}</b><span>${subText}</span>`;
 
@@ -732,7 +748,7 @@ function selectScope(id) {
 
   if ($('adminRetry')) $('adminRetry').style.display = 'none';
 
-  const isWh = (id === 'taskbar' || id === 'startmenu');
+  const isWh = scopeNeedsWh(id);
 
   if ($('engineCard')) $('engineCard').style.display = isWh ? 'block' : 'none';
 
@@ -740,7 +756,7 @@ function selectScope(id) {
 
   if (isWh) {
 
-    renderEngineTelemetry(id === 'startmenu' ? ST.startmenu_engine : ST.taskbar_engine, id);
+    renderEngineTelemetry(engineForScope(id), id);
 
   }
 
@@ -952,7 +968,7 @@ $('btnRestoreScope').addEventListener('click', () => {
 
 $('btnApplyAll').addEventListener('click', () => {
 
-  const msg = isWhAvailable() ? '正在套用全部三區 Liquid Glass…' : '正在套用桌面 Liquid Glass…';
+  const msg = isWhAvailable() ? '正在套用核心三區 Liquid Glass…' : '正在套用桌面 Liquid Glass…';
 
   run(a => a.apply_all(cfg), msg);
 
@@ -960,7 +976,7 @@ $('btnApplyAll').addEventListener('click', () => {
 
 $('btnRestoreAll').addEventListener('click', () => {
 
-  const msg = isWhAvailable() ? '正在還原全部三區原生圖示…' : '正在還原桌面原生圖示…';
+  const msg = isWhAvailable() ? '正在還原全部已啟用區域原生圖示…' : '正在還原桌面原生圖示…';
 
   run(a => a.restore_all(), msg);
 
@@ -1040,21 +1056,31 @@ bindSwitch('swShortcut', 'set_shortcut', '已於桌面建立 Liquid Glass 捷徑
 
 bindSwitch('swWatcher', 'set_watcher', '已開啟桌面捷徑即時監聽', '已關閉桌面捷徑即時監聽');
 
-if ($('swExitOnClose')) bindSwitch('swExitOnClose', 'set_exit_on_close', '關閉設定視窗時將直接結束程式（不再常駐背景）', '關閉設定視窗後維持背景系統匣常駐');
+if ($('swExitOnClose')) bindSwitch('swExitOnClose', 'set_exit_on_close', '關閉設定視窗時將直接結束程式（不再常駐背景）', '關閉設定視窗後維持通知區系統匣常駐（保留即時外觀、不佔工作列）');
 
-if ($('swRestoreOnExit')) bindSwitch('swRestoreOnExit', 'set_restore_on_exit', '已開啟退出程式時自動還原即時工作列與開始功能表', '已關閉退出自動還原（關閉程式仍維持外觀）');
+if ($('swRestoreOnExit')) bindSwitch('swRestoreOnExit', 'set_restore_on_exit', '已開啟僅於系統匣完全退出程式時自動還原即時外觀', '已關閉退出自動還原（結束程式仍維持外觀）');
 
 $('btnVault').addEventListener('click', () => api() && api().open_folder('vault'));
 
 $('btnBackup').addEventListener('click', () => api() && api().open_folder('backup'));
 
+const ENGINE_META = {
+
+  taskbar: { title: '工作列即時光學引擎', label: '已追蹤按鈕／渲染', unit: '顆按鈕', maxEnt: 64 },
+
+  startmenu: { title: '開始功能表即時光學引擎', label: '已追蹤圖示／渲染', unit: '顆圖示', maxEnt: 256 },
+
+  tray: { title: '通知列即時光學引擎（獨立測試）', label: '已追蹤托盤／渲染', unit: '顆托盤圖示', maxEnt: 128 },
+
+};
+
 function renderEngineTelemetry(st, sc = scope) {
 
-  const isSm = (sc === 'startmenu');
+  const meta = ENGINE_META[sc] || ENGINE_META.taskbar;
 
-  if ($('engCardTitle')) $('engCardTitle').textContent = isSm ? '開始功能表即時光學引擎' : '工作列即時光學引擎';
+  if ($('engCardTitle')) $('engCardTitle').textContent = meta.title;
 
-  if ($('engBtnsLabel')) $('engBtnsLabel').textContent = isSm ? '已追蹤圖示／渲染' : '已追蹤按鈕／渲染';
+  if ($('engBtnsLabel')) $('engBtnsLabel').textContent = meta.label;
 
   if (!st) return;
 
@@ -1096,7 +1122,7 @@ function renderEngineTelemetry(st, sc = scope) {
 
   if (t) {
 
-    const unit = isSm ? '顆圖示' : '顆按鈕';
+    const unit = meta.unit;
 
     $('engBtns').textContent = `${t.tracked_buttons || 0} ${unit}｜渲染 ${t.render_count || 0} 次 / 命中 ${t.cache_hits || 0}`;
 
@@ -1104,7 +1130,7 @@ function renderEngineTelemetry(st, sc = scope) {
 
     const maxMb = ((t.max_cache_bytes || (12 * 1024 * 1024)) / (1024 * 1024)).toFixed(0);
 
-    const maxEnt = t.max_cache_entries || (isSm ? 256 : 64);
+    const maxEnt = t.max_cache_entries || meta.maxEnt;
 
     $('engCache').textContent = `${t.cache_entries || 0}/${maxEnt} 筆（${mb} / ${maxMb} MB）`;
 
@@ -1112,7 +1138,7 @@ function renderEngineTelemetry(st, sc = scope) {
 
   } else {
 
-    const defMaxEnt = isSm ? 256 : 64;
+    const defMaxEnt = meta.maxEnt;
 
     const defMaxMb = 12;
 
@@ -1134,7 +1160,7 @@ function pollEngineStatus() {
 
   const sc = scope;
 
-  if (sc !== 'taskbar' && sc !== 'startmenu') return Promise.resolve(null);
+  if (!scopeNeedsWh(sc)) return Promise.resolve(null);
 
   const req = a.get_engine_status ? a.get_engine_status(sc) : (sc === 'taskbar' && a.get_taskbar_status ? a.get_taskbar_status() : null);
 
@@ -1142,13 +1168,7 @@ function pollEngineStatus() {
 
   return req.then(st => {
 
-    if (ST) {
-
-      if (sc === 'startmenu') ST.startmenu_engine = st;
-
-      else ST.taskbar_engine = st;
-
-    }
+    setEngineForScope(sc, st);
 
     if (scope === sc) renderEngineTelemetry(st, sc);
 
@@ -1226,9 +1246,13 @@ function renderStatusPill(s) {
 
   const sm = s.startmenu_engine || {};
 
+  const tr = s.tray_engine || {};
+
   const tbOn = !!(tb.enabled && tb.telemetry && tb.telemetry.active);
 
   const smOn = !!(sm.enabled && sm.telemetry && sm.telemetry.active);
+
+  const trOn = !!(tr.enabled && tr.telemetry && tr.telemetry.active);
 
   if (!isWhAvailable()) {
 
@@ -1240,13 +1264,15 @@ function renderStatusPill(s) {
 
     const smTxt = smOn ? `選單 ${(sm.telemetry && sm.telemetry.tracked_buttons) || 0}` : '選單待機';
 
-    $('status').textContent = `${tbTxt}・${smTxt}｜${s.backup_count} 母本`;
+    const trTxt = trOn ? `・通知列 ${(tr.telemetry && tr.telemetry.tracked_buttons) || 0}` : '';
+
+    $('status').textContent = `${tbTxt}・${smTxt}${trTxt}｜${s.backup_count} 母本`;
 
   }
 
-  if (scope === 'taskbar' || scope === 'startmenu') {
+  if (scopeNeedsWh(scope)) {
 
-    renderEngineTelemetry(scope === 'startmenu' ? sm : tb, scope);
+    renderEngineTelemetry(engineForScope(scope), scope);
 
   }
 

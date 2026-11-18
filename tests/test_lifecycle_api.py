@@ -20,8 +20,10 @@ def test_all_three_scopes_active_and_unlocked(env, monkeypatch):
     sm_lnk = os.path.join(env.sm, "Tools", "Editor.lnk")
     sm_before = open(sm_lnk, "rb").read()
 
-    assert S.ACTIVE_SCOPES == ("taskbar", "startmenu", "desktop")
+    assert S.ACTIVE_SCOPES == ("taskbar", "startmenu", "desktop", "tray")
     assert S.LOCKED_SCOPES == ()
+    assert SM.effective_active_scopes() == ["taskbar", "startmenu", "desktop"]
+    assert SM.effective_active_scopes(include_experimental=True) == ["taskbar", "startmenu", "desktop", "tray"]
     for sc in S.SCOPES:
         assert not S.is_scope_locked(sc)
     assert S.is_scope_locked("bogus")
@@ -54,13 +56,22 @@ def test_api_unlocks_all_three_scopes_and_exposes_engines(env, monkeypatch):
     for sc in S.SCOPES:
         assert st["specs"][sc]["locked"] is False
     assert "startmenu_engine" in st and st["startmenu_engine"]["scope"] == "startmenu"
+    assert "tray_engine" in st and st["tray_engine"]["scope"] == "tray"
+    assert st["experimental_scopes"] == ["tray"]
     assert api.get_engine_status("startmenu")["scope"] == "startmenu"
+    assert api.get_engine_status("tray")["scope"] == "tray"
     assert st["watcher_locked"] is False
 
     assert api.apply_scope("startmenu", S.default_params("startmenu"))["ok"] is True
     assert api.restore_scope("startmenu")["ok"] is True
     assert api.apply_all({sc: S.default_params(sc) for sc in S.SCOPES})["ok"] is True
+    assert WB.get_status(scope="taskbar")["enabled"] is True
+    assert WB.get_status(scope="startmenu")["enabled"] is True
+    assert WB.get_status(scope="tray")["enabled"] is False
+    assert api.apply_scope("tray", S.default_params("tray"))["ok"] is True
+    assert WB.get_status(scope="tray")["enabled"] is True
     assert api.restore_all()["ok"] is True
+    assert WB.get_status(scope="tray")["enabled"] is False
 
     assert api.set_watcher(True) is True
     assert json.load(open(RT.CONFIG_PATH))["watcher"]["enabled"] is True
@@ -73,10 +84,19 @@ def test_api_unlocks_all_three_scopes_and_exposes_engines(env, monkeypatch):
 
 def test_cli_supports_all_three_scopes_and_rejects_bogus(env):
     M = env.main
-    assert M._parse_target(["--apply"], "--apply") == ("all", ["taskbar", "startmenu", "desktop"])
-    assert M._parse_target(["--restore", "all"], "--restore") == ("all", ["taskbar", "startmenu", "desktop"])
+    assert M._parse_target(["--apply"], "--apply") == ("all", ["taskbar", "startmenu", "desktop", "tray"])
+    assert M._parse_target(["--restore", "all"], "--restore") == ("all", ["taskbar", "startmenu", "desktop", "tray"])
     assert M.main(["--apply", "bogus"]) == 2
     assert M.main(["--restore", "bogus"]) == 2
+    assert M.main(["--apply"]) == 0
+    assert WB.get_status(scope="taskbar")["enabled"] is True
+    assert WB.get_status(scope="startmenu")["enabled"] is True
+    assert WB.get_status(scope="tray")["enabled"] is False
+    assert M.main(["--apply", "tray"]) == 0
+    st_tr = WB.get_status(scope="tray")
+    assert st_tr["enabled"] is True and st_tr["ini_settings"]["Opacity"] == "100"
+    assert M.main(["--restore"]) == 0
+    assert WB.get_status(scope="tray")["enabled"] is False
     assert M.main(["--apply", "startmenu"]) == 0
     st_sm = WB.get_status(scope="startmenu")
     assert st_sm["enabled"] is True and st_sm["ini_settings"]["Opacity"] == "100"
@@ -117,6 +137,7 @@ def test_parse_startup_scope_and_webview_storage_path(env, monkeypatch):
     assert M._parse_startup_scope(["--settings", "--scope", "desktop"]) == "desktop"
     assert M._parse_startup_scope(["--settings", "--scope=taskbar"]) == "taskbar"
     assert M._parse_startup_scope(["--settings", "--scope", "startmenu"]) == "startmenu"
+    assert M._parse_startup_scope(["--settings", "--scope", "tray"]) == "tray"
     assert M._parse_startup_scope(["--settings", "--scope", "bogus"]) == ""
     assert M._parse_startup_scope([]) == ""
 
@@ -162,10 +183,15 @@ def test_api_relaunch_admin_wiztree_banner(env, monkeypatch):
     assert r_cancel["ok"] is False and not app.window.evt.is_set()
     assert calls == [(["--settings", "--scope", "desktop"], 1)]
 
+    tray_spawns = []
+    monkeypatch.setattr(TC, "spawn_background_tray", lambda: tray_spawns.append(1) or None)
+    monkeypatch.setattr(TC, "is_tray_running", lambda: False)
+
     calls.clear()
     monkeypatch.setattr(RT, "relaunch_as_admin", lambda args, show=0: calls.append((args, show)) or True)
     assert api.relaunch_admin("startmenu")["scope"] == "startmenu"
     assert calls[-1] == (["--settings", "--scope", "startmenu"], 1)
+    assert len(tray_spawns) == 1
     assert api.relaunch_admin("bogus")["scope"] == "taskbar"
     assert calls[-1] == (["--settings", "--scope", "taskbar"], 1)
     assert app.window.evt.wait(1.5)
@@ -198,6 +224,10 @@ def test_ui_html_has_wiztree_non_blocking_banner(env):
         "isWhAvailable",
         "optional-off",
         "僅桌面模式",
+        "repeat(4, 1fr)",
+        "tray_engine",
+        "ENGINE_META",
+        "獨立測試",
     ):
         assert token in html
     for stale in ("桌面・開始功能表目前封鎖", "開始功能表封鎖中", "開始功能表暫未開放"):
@@ -217,10 +247,12 @@ def test_optional_extension_fallback_without_windhawk(env, tmp_path, monkeypatch
     assert st["windhawk_installed"] is False
     assert st["default_scope"] == "desktop"
     assert st["available_scopes"] == ["desktop"]
-    assert st["optional_scopes"] == ["taskbar", "startmenu"]
+    assert st["optional_scopes"] == ["taskbar", "startmenu", "tray"]
+    assert st["experimental_scopes"] == ["tray"]
     assert st["specs"]["desktop"]["requires_windhawk"] is False
     assert st["specs"]["taskbar"]["requires_windhawk"] is True and "深色模式" in st["specs"]["taskbar"]["advisory"]
     assert st["specs"]["startmenu"]["requires_windhawk"] is True and "深色模式" in st["specs"]["startmenu"]["advisory"]
+    assert st["specs"]["tray"]["requires_windhawk"] is True and st["specs"]["tray"]["experimental"] is True
 
     r_all = api.apply_all({sc: S.default_params(sc) for sc in S.SCOPES})
     assert r_all["ok"] is True and [r["scope"] for r in r_all["results"]] == ["desktop"]
@@ -268,6 +300,9 @@ def test_lifecycle_config_and_restore_on_exit(env, monkeypatch):
     assert api.set_restore_on_exit(True) is True
     assert api.set_exit_on_close(True) is True and spawned == []
     assert api.set_exit_on_close(False) is False and spawned == [1]
+    monkeypatch.setattr(RT, "is_admin", lambda: True)
+    assert api.set_exit_on_close(False) is False and spawned == [1, 1]
+    monkeypatch.setattr(RT, "is_admin", lambda: False)
     st = api.get_state()
     assert st["restore_on_exit"] is True and st["exit_on_close"] is False
 
@@ -297,6 +332,25 @@ def test_lifecycle_config_and_restore_on_exit(env, monkeypatch):
     app.handle_window_closed()
     assert WB.get_status(scope="taskbar")["enabled"] is True and WB.get_status(scope="startmenu")["enabled"] is True
 
+    class FakeTrayProc:
+        def __init__(self):
+            self.checks = 0
+
+        def poll(self):
+            return None
+
+    app._tray_proc = FakeTrayProc()
+
+    def becomes_ready():
+        app._tray_proc.checks += 1
+        return app._tray_proc.checks >= 2
+
+    monkeypatch.setattr(TC, "is_tray_running", becomes_ready)
+    app.handle_window_closed()
+    assert app._tray_proc.checks >= 2
+    assert WB.get_status(scope="taskbar")["enabled"] is True
+    app._tray_proc = None
+
     monkeypatch.setattr(TC, "is_tray_running", lambda: False)
     app.handle_window_closed()
     assert WB.get_status(scope="taskbar")["enabled"] is False
@@ -314,12 +368,13 @@ def test_lifecycle_config_and_restore_on_exit(env, monkeypatch):
 
     exit_codes = []
     monkeypatch.setattr(TC.os, "_exit", lambda code=0: exit_codes.append(code))
-    SM.run_batch("apply", ["startmenu", "taskbar"], S.default_config())
+    SM.run_batch("apply", ["startmenu", "taskbar", "tray"], S.default_config())
     app.quit_app(restore=False)
-    assert WB.get_status(scope="taskbar")["enabled"] is True and exit_codes == [0]
+    assert WB.get_status(scope="taskbar")["enabled"] is True and WB.get_status(scope="tray")["enabled"] is True and exit_codes == [0]
     app.quit_app(restore=True)
     assert WB.get_status(scope="taskbar")["enabled"] is False
     assert WB.get_status(scope="startmenu")["enabled"] is False
+    assert WB.get_status(scope="tray")["enabled"] is False
     assert open(d_lnk, "rb").read() == d_before
     assert exit_codes == [0, 0]
 
@@ -331,5 +386,5 @@ def test_cli_version_and_self_check(env, capsys):
     assert M.main(["--check"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["version"] == S.VERSION
-    assert all(report[k] is True for k in ("ui_html", "app_ico", "app_png", "taskbar_mod_cpp", "startmenu_mod_cpp"))
+    assert all(report[k] is True for k in ("ui_html", "app_ico", "app_png", "taskbar_mod_cpp", "startmenu_mod_cpp", "tray_mod_cpp"))
 

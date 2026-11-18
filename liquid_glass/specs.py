@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from typing import Any
 
-# Lines 15-35: 版本號與三區範圍鎖定狀態
-VERSION = "2.0.0"
+# Lines 15-35: 版本號與四區範圍狀態（tray 為第 4 獨立測試區）
+VERSION = "2.1.0"
 
 # 演算法或輸出格式變動時 +1，IconVault 的渲染快取會自動失效並重新生成。
 RENDER_VERSION = 7
 
-SCOPES: tuple[str, ...] = ("desktop", "startmenu", "taskbar")
-ACTIVE_SCOPES: tuple[str, ...] = ("taskbar", "startmenu", "desktop")
+SCOPES: tuple[str, ...] = ("desktop", "startmenu", "taskbar", "tray")
+ACTIVE_SCOPES: tuple[str, ...] = ("taskbar", "startmenu", "desktop", "tray")
 LOCKED_SCOPES: tuple[str, ...] = ()
 ICO_SIZES: tuple[int, ...] = (256, 128, 96, 64, 48, 40, 36, 32, 24, 16)
 
@@ -44,11 +44,13 @@ SCOPE_SOURCES: dict[str, tuple[str, ...]] = {
     "desktop": (SOURCE_USER, SOURCE_COMMON),
     "startmenu": (SOURCE_USER, SOURCE_COMMON),
     "taskbar": (SOURCE_USER,),
+    "tray": (SOURCE_USER,),
 }
 SCOPE_EXTS: dict[str, tuple[str, ...]] = {
     "desktop": (".lnk", ".url"),
     "startmenu": (".lnk",),
     "taskbar": (".lnk",),
+    "tray": (".lnk",),
 }
 
 # .url（網際網路捷徑，INI 文字檔）
@@ -86,6 +88,8 @@ def backup_parts(scope: str, source: str) -> tuple[str, ...]:
         return () if source == SOURCE_USER else ("PublicDesktop",)
     if scope == "taskbar":
         return ("Taskbar",)
+    if scope == "tray":
+        return ("Tray",)
     return ("StartMenu", source)
 
 
@@ -213,6 +217,7 @@ SPECS: dict[str, dict[str, Any]] = {
         "style": "即時光學液態玻璃（桌面獨立核心）",
         "summary": "免外掛獨立運作；高透光清透本體＋銳利加厚外緣斜角（Rim）與內部接縫捕光（支援個人／公用捷徑與自動監聽）。",
         "requires_windhawk": False,
+        "experimental": False,
         "advisory": "",
         "framed": False,
         "actual_px": 48,
@@ -226,6 +231,7 @@ SPECS: dict[str, dict[str, Any]] = {
         "style": "Windhawk 選用擴充（即時引擎）",
         "summary": "需搭配 Windhawk；直掛 StartMenuExperienceHost 即時轉換（免改捷徑、Win32／商店 App／資料夾皆同步套用，隨時即時還原）。",
         "requires_windhawk": True,
+        "experimental": False,
         "advisory": (
             "視覺建議：純冰白玻璃適合 Windows 深色模式或搭配 Windhawk 透明主題"
             "（如 Windows 11 Start Menu Styler）；在「淺色且不透明」開始選單上對比度較低，本模組不修改其他外掛配置。"
@@ -242,6 +248,7 @@ SPECS: dict[str, dict[str, Any]] = {
         "style": "Windhawk 選用擴充（即時引擎）",
         "summary": "需搭配 Windhawk；僅轉換工作列 App 圖示為清透冰白光學玻璃（系統預設底部與置頂工作列皆獨立相容、完全不與其他工作列模組衝突）。",
         "requires_windhawk": True,
+        "experimental": False,
         "advisory": (
             "視覺建議：建議搭配 Windows 深色模式，或加裝 Windhawk「Windows 11 Taskbar Styler"
             "（如 SimplyTransparent）」作為透明底座；若維持淺色不透明工作列，冰白對比會明顯降低。"
@@ -250,6 +257,26 @@ SPECS: dict[str, dict[str, Any]] = {
         "framed": False,
         "actual_px": 36,
         "ico_suffix": "_taskbar_glass.ico",
+        "params": _optical_params(),
+    },
+    "tray": {
+        "id": "tray",
+        "label": "通知列",
+        "icon": "🔔",
+        "style": "Windhawk 獨立測試擴充（選用引擎）",
+        "summary": (
+            "獨立於核心三區的實驗性擴充（v2.1 測試版）；專責轉換右下角常駐系統匣與「^」隱藏圖示溢位區，"
+            "不含「一鍵套用核心三區」自動啟用，可隨時在此分頁獨立啟閉與即時還原。"
+        ),
+        "requires_windhawk": True,
+        "experimental": True,
+        "advisory": (
+            "獨立測試須知：本區改掛 SystemTray.dll 已載入視覺層（ImageIconContent），刻意避開與間距／置頂外掛重疊的建構子；"
+            "目前不包含一鍵批次套用（但「一鍵還原」會安全一併停用），建議先於此分頁獨立測試展開「^」溢位匣與點擊圖示穩定度。"
+        ),
+        "framed": False,
+        "actual_px": 20,
+        "ico_suffix": "_tray_glass.ico",
         "params": _optical_params(),
     },
 }

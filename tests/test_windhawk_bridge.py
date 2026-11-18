@@ -13,6 +13,7 @@ def test_windhawk_bridge_ini_settings_restore_and_status(env):
     for sc, target_proc, telem_name in (
         ("taskbar", "explorer.exe", "lgic_windhawk_status.json"),
         ("startmenu", "StartMenuExperienceHost.exe", "lgic_windhawk_startmenu_status.json"),
+        ("tray", "explorer.exe", "lgic_windhawk_tray_status.json"),
     ):
         r1 = WB.apply_windhawk_mod(sc, {"opacity": 0.85, "frost": 1.15, "glow": 1.40, "dark_protect": 0.90})
         assert r1["ok"] is True and r1["compiled"] is True

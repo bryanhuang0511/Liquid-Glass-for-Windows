@@ -30,14 +30,26 @@ class LiquidGlassApi:
         self._plock = threading.Lock()
 
     # Lines 30-75: 狀態讀取與引擎遙測
+    @staticmethod
+    def _engine_statuses() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        return (
+            WB.get_status(base_dir=RT.BASE_DIR, scope="taskbar"),
+            WB.get_status(base_dir=RT.BASE_DIR, scope="startmenu"),
+            WB.get_status(base_dir=RT.BASE_DIR, scope="tray"),
+        )
+
     def get_state(self) -> dict[str, Any]:
         """回傳前端啟動所需完整狀態（純輕量讀取，不執行影像運算）。"""
         wc = self.get_watcher()
-        tb_st = WB.get_status(base_dir=RT.BASE_DIR, scope="taskbar")
-        sm_st = WB.get_status(base_dir=RT.BASE_DIR, scope="startmenu")
-        wh_installed = bool(tb_st.get("windhawk_installed") or sm_st.get("windhawk_installed"))
+        tb_st, sm_st, tr_st = self._engine_statuses()
+        wh_installed = bool(
+            tb_st.get("windhawk_installed")
+            or sm_st.get("windhawk_installed")
+            or tr_st.get("windhawk_installed")
+        )
         available = [sc for sc in S.ACTIVE_SCOPES if (not S.SPECS[sc].get("requires_windhawk") or wh_installed)]
         optional = [sc for sc in S.ACTIVE_SCOPES if S.SPECS[sc].get("requires_windhawk")]
+        experimental = [sc for sc in S.ACTIVE_SCOPES if S.SPECS[sc].get("experimental")]
         lc = self._app.get_lifecycle()
         return {
             "version": S.VERSION,
@@ -45,10 +57,11 @@ class LiquidGlassApi:
             "active_scopes": list(S.ACTIVE_SCOPES),
             "available_scopes": available,
             "optional_scopes": optional,
+            "experimental_scopes": experimental,
             "locked_scopes": list(S.LOCKED_SCOPES),
             "default_scope": S.ACTIVE_SCOPES[0] if wh_installed else "desktop",
             "windhawk_installed": wh_installed,
-            "windhawk_dir": tb_st.get("windhawk_dir") or "",
+            "windhawk_dir": tb_st.get("windhawk_dir") or sm_st.get("windhawk_dir") or tr_st.get("windhawk_dir") or "",
             "specs": S.SPECS,
             "config": {sc: self._app.config[sc] for sc in S.SCOPES},
             "autostart": RT.is_autostart_enabled(),
@@ -61,8 +74,10 @@ class LiquidGlassApi:
             "exit_on_close": bool(lc["exit_when_window_closes"]),
             "backup_count": SM.count_backups(),
             "is_admin": RT.is_admin(),
+            "tray_running": TC.is_tray_running(),
             "taskbar_engine": tb_st,
             "startmenu_engine": sm_st,
+            "tray_engine": tr_st,
         }
 
     def get_taskbar_status(self) -> dict[str, Any]:
@@ -132,18 +147,22 @@ class LiquidGlassApi:
         ok = res is not None and not any(r.get("failed") for r in res)
         needs_admin = sum(r.get("needs_admin", 0) for r in (res or []))
         wh_needs_admin = any(r.get("windhawk_needs_admin") for r in (res or []))
-        tb_st = WB.get_status(base_dir=RT.BASE_DIR, scope="taskbar")
-        sm_st = WB.get_status(base_dir=RT.BASE_DIR, scope="startmenu")
+        tb_st, sm_st, tr_st = self._engine_statuses()
         return {
             "ok": ok,
             "kind": kind,
             "needs_admin": needs_admin,
             "windhawk_needs_admin": wh_needs_admin,
-            "windhawk_installed": bool(tb_st.get("windhawk_installed") or sm_st.get("windhawk_installed")),
+            "windhawk_installed": bool(
+                tb_st.get("windhawk_installed")
+                or sm_st.get("windhawk_installed")
+                or tr_st.get("windhawk_installed")
+            ),
             "results": res,
             "message": SM.summarize(res, kind),
             "taskbar_engine": tb_st,
             "startmenu_engine": sm_st,
+            "tray_engine": tr_st,
         }
 
     def apply_scope(self, scope: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -164,8 +183,8 @@ class LiquidGlassApi:
         return self._batch_response("restore", SM.run_batch("restore", [scope], self._app.config))
 
     def apply_all(self, all_params: dict[str, Any]) -> dict[str, Any]:
-        """套用目前系統所有可用區域（未裝 Windhawk 時自動僅套用桌面）。"""
-        scopes = SM.effective_active_scopes() or ["desktop"]
+        """套用目前系統所有可用核心區域（未裝 Windhawk 時自動僅套用桌面，不含獨立測試分頁）。"""
+        scopes = SM.effective_active_scopes(include_experimental=False) or ["desktop"]
         for sc in scopes:
             if isinstance(all_params, dict) and sc in all_params:
                 self._app.config[sc] = S.clamp_params(sc, all_params[sc])
@@ -173,8 +192,8 @@ class LiquidGlassApi:
         return self._batch_response("apply", SM.run_batch("apply", scopes, self._app.config))
 
     def restore_all(self) -> dict[str, Any]:
-        """還原目前系統所有可用區域。"""
-        scopes = SM.effective_active_scopes() or ["desktop"]
+        """還原目前系統所有可用區域（含獨立測試擴充，確保安全回復原廠外觀）。"""
+        scopes = SM.effective_active_scopes(include_experimental=True) or ["desktop"]
         return self._batch_response("restore", SM.run_batch("restore", scopes, self._app.config))
 
     def get_progress(self) -> dict[str, Any]:
@@ -205,6 +224,8 @@ class LiquidGlassApi:
         if not RT.relaunch_as_admin(["--settings", "--scope", sc], show=1):
             self._app._relaunching_admin = False
             return {"ok": False, "message": "未取得系統管理員權限（UAC 已取消或無法提權）"}
+        if (not self._app.get_lifecycle()["exit_when_window_closes"]) and (not TC.is_tray_running()):
+            self._app._ensure_tray_spawned()
         win = getattr(self._app, "window", None)
         if win is not None:
 
@@ -284,13 +305,13 @@ class LiquidGlassApi:
         return bool(lc["restore_live_on_exit"])
 
     def set_exit_on_close(self, val: Any) -> bool:
-        """設定關閉設定視窗時是否同步退出程式（不常駐系統匣）。"""
+        """設定關閉設定視窗時是否同步退出程式（關閉則縮小常駐系統匣通知區）。"""
         lc = self._app.get_lifecycle()
         lc["exit_when_window_closes"] = bool(val)
         self._app.config["lifecycle"] = lc
         self._app.save_config(lifecycle_changed=True)
-        if (not lc["exit_when_window_closes"]) and (not RT.is_admin()) and (not TC.is_tray_running()):
-            TC.spawn_background_tray()
+        if (not lc["exit_when_window_closes"]) and (not TC.is_tray_running()):
+            self._app._ensure_tray_spawned()
         return bool(lc["exit_when_window_closes"])
 
     def open_folder(self, which: str) -> bool:

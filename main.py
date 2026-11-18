@@ -50,8 +50,8 @@ def _cli(app: TC.LiquidGlassApp, argv: Sequence[str]) -> int:
         return err
     skipped_opt: list[str] = []
     if target == "all":
-        avail = SM.effective_active_scopes() or ["desktop"]
-        skipped_opt = [sc for sc in scopes if sc not in avail]
+        avail = SM.effective_active_scopes(include_experimental=(kind == "restore")) or ["desktop"]
+        skipped_opt = [sc for sc in scopes if sc not in avail and not S.SPECS[sc].get("experimental")]
         scopes = avail
     res = SM.run_batch(kind, scopes, app.config)
     msg = SM.summarize(res, kind)
@@ -118,6 +118,7 @@ def _run_self_check() -> int:
         "app_png": os.path.exists(RT.resolve_app_png_path()),
         "taskbar_mod_cpp": _WB.find_source_cpp(RT.BASE_DIR, scope="taskbar") is not None,
         "startmenu_mod_cpp": _WB.find_source_cpp(RT.BASE_DIR, scope="startmenu") is not None,
+        "tray_mod_cpp": _WB.find_source_cpp(RT.BASE_DIR, scope="tray") is not None,
     }
     print(json.dumps(report, ensure_ascii=False))
     return 0 if all(report.values()) else 1
