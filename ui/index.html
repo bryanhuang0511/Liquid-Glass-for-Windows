@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+
+<html lang="zh-TW">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Liquid Glass 圖示中樞</title>
+
+<style>
+
+  /* v1.3.2：全部移除 filter:blur / backdrop-filter（背景是靜態的，不需要 GPU 每幀重算），改靜態漸層 */
+
+  :root {
+
+    --bg: #080b1a;
+
+    --ink: #f4f8ff;
+
+    --ink-dim: rgba(226, 236, 255, 0.74);
+
+    --ink-muted: rgba(200, 216, 245, 0.50);
+
+    --accent: #60a5fa;
+
+    --good: #34d399;
+
+    --warn: #fbbf24;
+
+    --danger: #f87171;
+
+    --card: linear-gradient(145deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 60%, rgba(255,255,255,0.07) 100%);
+
+    --edge: rgba(255,255,255,0.16);
+
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+
+    min-height: 100%; background: var(--bg); color: var(--ink);
+
+    font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft JhengHei UI', -apple-system, sans-serif;
+
+    user-select: none; overflow-x: hidden;
+
+  }
+
+  body {
+
+    background:
+
+      radial-gradient(520px 340px at 8% -4%, rgba(59,130,246,0.30), transparent 70%),
+
+      radial-gradient(460px 320px at 100% 22%, rgba(139,92,246,0.24), transparent 70%),
+
+      radial-gradient(520px 340px at 40% 108%, rgba(6,182,212,0.20), transparent 70%),
+
+      #080b1a;
+
+    background-attachment: fixed;
+
+  }
+
+  .wrap { max-width: 720px; margin: 0 auto; padding: 22px 22px 120px; display: flex; flex-direction: column; gap: 14px; }
+
+  .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+  .brand { display: flex; align-items: center; gap: 12px; }
+
+  .badge-icon {
+
+    width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center;
+
+    background: linear-gradient(145deg, rgba(255,255,255,0.20), rgba(255,255,255,0.06));
+
+    border: 1px solid rgba(255,255,255,0.30); box-shadow: 0 4px 16px rgba(96,165,250,0.35), inset 0 1px 1px rgba(255,255,255,0.55);
+
+  }
+
+  .dots { display: grid; grid-template-columns: repeat(3, 6px); gap: 4px; }
+
+  .dots i { width: 6px; height: 6px; border-radius: 50%; background: #fff; box-shadow: 0 0 6px rgba(255,255,255,0.9); }
+
+  h1 { font-size: 18px; font-weight: 700; letter-spacing: .4px; }
+
+  h1 small { font-size: 11px; font-weight: 600; color: var(--accent); margin-left: 6px; letter-spacing: 0; }
+
+  .sub { font-size: 12px; color: var(--ink-dim); margin-top: 2px; }
+
+  .status { font-size: 11px; padding: 4px 10px; border-radius: 20px; white-space: nowrap;
+
+    background: rgba(52,211,153,0.14); border: 1px solid rgba(52,211,153,0.35); color: #6ee7b7; }
+
+  .card { background: var(--card); border: 1px solid var(--edge); border-radius: 16px; padding: 16px 18px;
+
+    box-shadow: 0 10px 28px rgba(4,8,28,0.45), inset 0 1px 1px rgba(255,255,255,0.28); }
+
+  .card-title { font-size: 12px; font-weight: 700; letter-spacing: .8px; color: var(--accent); margin-bottom: 10px;
+
+    display: flex; align-items: center; justify-content: space-between; text-transform: uppercase; }
+
+  .card-title span.note { text-transform: none; font-weight: 500; letter-spacing: 0; color: var(--ink-muted); }
+
+  /* 分頁 */
+
+  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+
+  .tab { cursor: pointer; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--edge); background: rgba(255,255,255,0.05);
+
+    color: var(--ink); text-align: left; transition: background .15s, border-color .15s; font: inherit; }
+
+  .tab:hover { background: rgba(255,255,255,0.10); }
+
+  .tab.active { background: linear-gradient(145deg, rgba(96,165,250,0.30), rgba(96,165,250,0.12)); border-color: rgba(147,197,253,0.65);
+
+    box-shadow: 0 0 0 1px rgba(147,197,253,0.25), 0 6px 18px rgba(59,130,246,0.28); }
+
+  .tab.locked { cursor: not-allowed; opacity: 0.42; background: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.06);
+
+    pointer-events: none; user-select: none; box-shadow: none; }
+
+  .tab.optional-off { border-style: dashed; border-color: rgba(148,163,184,0.30); background: rgba(255,255,255,0.03); }
+
+  .tab.optional-off b { color: #cbd5e1; }
+
+  .tab.optional-off span { color: var(--ink-muted); }
+
+  .opt-banner { display: none; margin-top: 10px; padding: 11px 13px; border-radius: 12px;
+
+    background: rgba(59,130,246,0.10); border: 1px solid rgba(96,165,250,0.34); font-size: 12px; line-height: 1.55; color: #dbeafe; }
+
+  .opt-banner.show { display: block; }
+
+  .opt-banner-head { font-weight: 700; color: #93c5fd; margin-bottom: 4px; }
+
+  .opt-banner-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+  .opt-code { user-select: text; padding: 3px 9px; border-radius: 7px; background: rgba(15,23,42,0.75);
+
+    border: 1px solid rgba(255,255,255,0.14); font-family: Consolas, monospace; font-size: 11.5px; color: #93c5fd; }
+
+  .advisory-box { display: none; margin-top: 10px; padding: 9px 12px; border-radius: 11px;
+
+    background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.28); font-size: 11.8px; line-height: 1.52; color: #fde68a; }
+
+  .advisory-box.show { display: block; }
+
+  .tab b { display: block; font-size: 14px; }
+
+  .tab span { display: block; font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
+
+  .eng-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 12px; font-size: 12px; margin-top: 8px; }
+
+  .eng-item { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 8px 10px; }
+
+  .eng-item b { display: block; font-size: 11px; color: var(--ink-muted); margin-bottom: 2px; font-weight: 500; }
+
+  .eng-item span { color: var(--ink); font-weight: 600; font-size: 12.5px; }
+
+  .eng-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; text-transform: none; }
+
+  .eng-pill.on { background: rgba(52,211,153,0.16); color: #6ee7b7; border: 1px solid rgba(52,211,153,0.35); }
+
+  .eng-pill.off { background: rgba(148,163,184,0.14); color: #cbd5e1; border: 1px solid rgba(148,163,184,0.26); }
+
+  .scope-sum { font-size: 12.5px; color: var(--ink-dim); line-height: 1.5; }
+
+  .scope-sum b { color: var(--ink); }
+
+  /* 預覽 */
+
+  .pv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  @media (max-width: 600px) { .pv-grid { grid-template-columns: 1fr; } }
+
+  .pv-box { border-radius: 12px; border: 1px solid rgba(255,255,255,0.10); padding: 12px 10px 8px; background: rgba(8,12,28,0.55); }
+
+  .pv-row { display: flex; align-items: center; justify-content: space-around; gap: 6px; min-height: 120px; }
+
+  .pv-row.small { min-height: 72px; }
+
+  .pv-row img { display: block; }
+
+  .pv-cap { font-size: 11px; color: var(--ink-muted); text-align: center; margin-top: 6px; }
+
+  /* 實際尺寸的情境底 */
+
+  .ctx-desktop { background: linear-gradient(135deg, #1e3a5f 0%, #3b2a6b 55%, #14323f 100%); border-radius: 10px; }
+
+  .ctx-startmenu { background: rgba(34, 38, 54, 0.92); border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); }
+
+  .ctx-taskbar { background: rgba(26, 28, 38, 0.96); border-radius: 18px; border: 1px solid rgba(255,255,255,0.12); padding: 0 10px; }
+
+  .pv-loading { opacity: .35; }
+
+  /* 滑桿 */
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+
+  .row:last-child { border-bottom: none; }
+
+  .lbl { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+  .lbl b { font-size: 13px; font-weight: 500; }
+
+  .lbl small { font-size: 11px; color: var(--ink-muted); }
+
+  .sl { display: flex; align-items: center; gap: 10px; width: 240px; flex-shrink: 0; }
+
+  input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; height: 5px; border-radius: 4px; background: rgba(255,255,255,0.16); outline: none; }
+
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #fff; cursor: pointer;
+
+    box-shadow: 0 0 10px rgba(255,255,255,0.7), 0 2px 4px rgba(0,0,0,0.4); }
+
+  .val { font-size: 12px; font-weight: 600; color: var(--accent); min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* 開關 */
+
+  .switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+
+  .switch input { opacity: 0; width: 0; height: 0; }
+
+  .knob { position: absolute; inset: 0; cursor: pointer; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); border-radius: 24px; transition: .25s; }
+
+  .knob:before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .25s; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
+
+  .switch input:checked + .knob { background: linear-gradient(135deg, #60a5fa, #3b82f6); border-color: #93c5fd; }
+
+  .switch input:checked + .knob:before { transform: translateX(20px); }
+
+  .switch input:disabled + .knob { opacity: .4; cursor: not-allowed; }
+
+  /* 按鈕 */
+
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  .btns.one { grid-template-columns: 1fr; }
+
+  .btn { padding: 11px 16px; border-radius: 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent;
+
+    display: flex; align-items: center; justify-content: center; gap: 8px; transition: transform .15s, box-shadow .15s, background .15s; color: #fff; }
+
+  .btn:disabled { opacity: .5; cursor: not-allowed; transform: none !important; }
+
+  body.busy .btn:disabled { cursor: progress; }
+
+  .btn.primary { background: linear-gradient(135deg, rgba(96,165,250,0.88), rgba(59,130,246,0.96)); box-shadow: 0 4px 16px rgba(59,130,246,0.35), inset 0 1px 1px rgba(255,255,255,0.45); }
+
+  .btn.primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(59,130,246,0.55), inset 0 1px 1px rgba(255,255,255,0.6); }
+
+  .btn.ghost { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); }
+
+  .btn.ghost:hover:not(:disabled) { background: rgba(255,255,255,0.14); }
+
+  .btn.danger { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.38); color: #fca5a5; }
+
+  .btn.danger:hover:not(:disabled) { background: rgba(239,68,68,0.26); }
+
+  .link { background: none; border: none; color: var(--ink-muted); font: inherit; font-size: 11px; cursor: pointer; text-decoration: underline; }
+
+  .hint { font-size: 11.5px; color: var(--warn); margin-top: 8px; display: none; }
+
+  /* 進度與提示 */
+
+  .progress { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); width: min(560px, calc(100% - 44px)); display: none; z-index: 90;
+
+    background: rgba(15,23,42,0.96); border: 1px solid rgba(255,255,255,0.2); border-radius: 14px; padding: 10px 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+
+  .progress.show { display: block; }
+
+  .progress .t { font-size: 12px; color: var(--ink-dim); margin-bottom: 6px; display: flex; justify-content: space-between; }
+
+  .bar { height: 6px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; }
+
+  .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #60a5fa, #a78bfa); transition: width .2s; }
+
+  .life-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  @media (max-width: 600px) { .life-grid { grid-template-columns: 1fr; } }
+
+  .life-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 11px; border-radius: 12px;
+
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+
+  .life-item .lbl b { font-size: 12.5px; }
+
+  .life-item .lbl small { font-size: 11px; }
+
+  .toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(40px); max-width: min(640px, calc(100% - 44px));
+
+    background: rgba(15,23,42,0.96); border: 1px solid rgba(255,255,255,0.2); color: var(--ink); font-size: 13px; padding: 10px 20px; border-radius: 22px;
+
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; z-index: 100; line-height: 1.45; text-align: center; }
+
+  .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+  /* 頂端非強制管理員重啟橫幅（WizTree 風格） */
+
+  .status-wrap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+  .admin-pill { display: none; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 999px;
+
+    background: rgba(52,211,153,0.14); border: 1px solid rgba(52,211,153,0.38); color: #6ee7b7; white-space: nowrap; }
+
+  .admin-pill.show { display: inline-flex; }
+
+  .elevate-bar { display: none; align-items: center; gap: 12px; margin-bottom: 14px; padding: 10px 14px; border-radius: 14px;
+
+    background: linear-gradient(135deg, rgba(251,191,36,0.12), rgba(245,158,11,0.06)); border: 1px solid rgba(251,191,36,0.36);
+
+    box-shadow: 0 6px 20px rgba(0,0,0,0.22); }
+
+  .elevate-bar.show { display: flex; flex-wrap: wrap; }
+
+  .btn-elevate { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 10px; cursor: pointer;
+
+    background: rgba(255,255,255,0.09); border: 1px solid rgba(255,255,255,0.24); color: var(--ink); font-size: 13px; font-weight: 600;
+
+    white-space: nowrap; transition: background .15s, border-color .15s, transform .1s; }
+
+  .btn-elevate:hover:not(:disabled) { background: rgba(255,255,255,0.16); border-color: rgba(251,191,36,0.65); }
+
+  .btn-elevate:active:not(:disabled) { transform: scale(0.98); }
+
+  .btn-elevate:disabled { opacity: .6; cursor: wait; }
+
+  .elevate-warn { flex: 0 0 auto; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; }
+
+  .elevate-msg { flex: 1; min-width: 240px; font-size: 12.5px; line-height: 1.48; color: #fde68a; }
+
+</style>
+
+</head>
+
+<body>
+
+<div class="wrap">
+
+<div class="header">
+
+<div class="brand">
+
+<div class="badge-icon"><div class="dots"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+
+<div>
+
+<h1>Liquid Glass 圖示中樞<small id="ver">v2.0.0</small></h1>
+
+<div class="sub">桌面原生光學圖示立即可用｜工作列與開始功能表為 Windhawk 選用擴充</div>
+
+</div>
+
+</div>
+
+<div class="status-wrap">
+
+<span class="admin-pill" id="adminPill">🛡️ 系統管理員權限</span>
+
+<div class="status" id="status">檢測中…</div>
+
+</div>
+
+</div>
+
+<div class="elevate-bar" id="elevateBanner" role="region" aria-label="系統管理員重啟建議">
+
+<button class="btn-elevate" id="btnElevateRelaunch" type="button">以系統管理員身分重新啟動</button>
+
+<span class="elevate-warn" aria-hidden="true">
+
+<svg viewBox="0 0 24 24" width="20" height="20">
+
+<path d="M12 2.5L1.8 20.5h20.4L12 2.5z" fill="#facc15" stroke="#ca8a04" stroke-width="1.2" stroke-linejoin="round"/>
+
+<path d="M12 9.2v5.4" stroke="#111827" stroke-width="2.1" stroke-linecap="round"/>
+
+<circle cx="12" cy="17.5" r="1.25" fill="#111827"/>
+
+</svg>
+
+</span>
+
+<div class="elevate-msg">需要「系統管理員」權限，才能一次完整套用或還原「公用桌面」等共用捷徑；點選「以系統管理員身分重新啟動」可立即授權，或繼續以一般權限使用。</div>
+
+</div>
+
+<div class="tabs" id="tabs"></div>
+
+<div class="card" style="padding:12px 16px" aria-label="常駐與退出開關">
+
+<div class="card-title" style="margin-bottom:8px"><span>常駐與退出開關</span><span class="note">退出還原僅針對工作列／開始功能表（不改動桌面捷徑）</span></div>
+
+<div class="life-grid">
+
+<div class="life-item" id="exitOnCloseRow"><div class="lbl"><b>關閉視窗直接結束程式</b><small>不留背景系統匣常駐</small></div><label class="switch"><input type="checkbox" id="swExitOnClose"><span class="knob"></span></label></div>
+
+<div class="life-item" id="restoreOnExitRow"><div class="lbl"><b>退出自動還原即時外觀</b><small>結束程式即回復原廠圖示</small></div><label class="switch"><input type="checkbox" id="swRestoreOnExit"><span class="knob"></span></label></div>
+
+</div>
+
+</div>
+
+<div class="card">
+
+<div class="scope-sum" id="scopeSum"></div>
+
+<div class="opt-banner" id="whOptionalBox" role="region" aria-label="Windhawk 選用擴充說明">
+
+<div class="opt-banner-head">🔌 未偵測到 Windhawk（本區為選用擴充功能）</div>
+
+<div>一般使用者可先直接使用完全獨立、免任何系統外掛的「桌面」區域。若想啟用工作列／開始功能表即時透明圖示，請安裝 Windhawk（自動支援 <code>C:\Windhawk</code> 與 <code>C:\Program Files\Windhawk</code>）後按重新偵測：</div>
+
+<div class="opt-banner-actions">
+
+<code class="opt-code" id="whUrlText">https://windhawk.net/</code>
+
+<button class="btn ghost" id="btnCopyWhUrl" type="button" style="padding:6px 11px;font-size:12px">📋 複製官網網址</button>
+
+<button class="btn primary" id="btnRecheckWh" type="button" style="padding:6px 12px;font-size:12px">🔄 重新偵測 Windhawk</button>
+
+</div>
+
+</div>
+
+<div class="advisory-box" id="visualAdvisoryBox"></div>
+
+</div>
+
+<div class="card" id="engineCard">
+
+<div class="card-title"><span id="engCardTitle">工作列即時光學引擎</span><span class="eng-pill off" id="engBadge">未啟動</span></div>
+
+<div class="eng-grid">
+
+<div class="eng-item"><b>Windhawk 執行期</b><span id="engWh">—</span></div>
+
+<div class="eng-item"><b id="engBtnsLabel">已追蹤按鈕／渲染</b><span id="engBtns">—</span></div>
+
+<div class="eng-item"><b>純記憶體快取 (LRU)</b><span id="engCache">—</span></div>
+
+<div class="eng-item"><b>低解析度圖示紀錄</b><span id="engLowRes">—</span></div>
+
+</div>
+
+</div>
+
+<div class="card">
+
+<div class="card-title"><span>實時預覽</span><span class="note" id="pvNote">四個靶材原型：金環／雙圓／紅白輪廓／亮底暗字，驗證清透光學與內緣光暈</span></div>
+
+<div class="pv-grid">
+
+<div class="pv-box"><div class="pv-row" id="pvBig"></div><div class="pv-cap">放大預覽</div></div>
+
+<div class="pv-box"><div class="pv-row small" id="pvAct"></div><div class="pv-cap" id="pvActCap">實際尺寸</div></div>
+
+</div>
+
+</div>
+
+<div class="card">
+
+<div class="card-title"><span id="slTitle">調校</span><button class="link" id="btnReset">重設此區預設</button></div>
+
+<div id="sliders"></div>
+
+<div class="btns" style="margin-top:12px">
+
+<button class="btn primary" id="btnApplyScope">✨ 套用並啟用工作列 Liquid Glass</button>
+
+<button class="btn danger" id="btnRestoreScope">🛡️ 還原工作列原生圖示</button>
+
+</div>
+
+<div class="hint" id="adminHint">⚠️ 「公用桌面」捷徑位於系統共用位置，一般權限將略過；若要一次套用或還原全部項目，可點選最上方「以系統管理員身分重新啟動」。</div>
+<div id="adminRetry" class="hint" style="display:none; color:#fbbf24; padding:12px; border:1px solid rgba(251,191,36,.35); border-radius:12px; background:rgba(251,191,36,.08)">
+🛡️ 發現公用捷徑需要權限：
+<button class="btn primary" id="btnAdminRetry" type="button">以管理員身分重試公用捷徑</button>
+</div>
+
+</div>
+
+<div class="card">
+
+<div class="card-title"><span>全區批次控制</span><span class="note" id="batchNote">一次套用或還原：工作列、開始功能表、桌面</span></div>
+
+<div class="btns">
+
+<button class="btn primary" id="btnApplyAll" type="button">✨ 一鍵套用全部三區</button>
+
+<button class="btn danger" id="btnRestoreAll" type="button">🛡️ 一鍵還原全部三區</button>
+
+</div>
+
+</div>
+
+<div class="card">
+
+<div class="card-title"><span>系統與捷徑</span></div>
+
+<div class="row"><div class="lbl"><b>開機自動啟動</b><small>Windows 開機時於背景常駐系統匣</small></div>
+
+<label class="switch"><input type="checkbox" id="swAutostart"><span class="knob"></span></label></div>
+
+<div class="row"><div class="lbl"><b>在桌面建立捷徑</b><small>建立 Liquid Glass 圖示中樞專屬桌面捷徑</small></div>
+
+<label class="switch"><input type="checkbox" id="swShortcut"><span class="knob"></span></label></div>
+
+<div class="row" id="watcherRow"><div class="lbl"><b id="watcherTitle">桌面捷徑即時監聽</b><small id="watcherDesc">背景自動為桌面新增或更新的 .lnk / .url 捷徑套用光學液態玻璃</small></div>
+
+<label class="switch"><input type="checkbox" id="swWatcher"><span class="knob"></span></label></div>
+
+<div class="row"><div class="lbl"><b>資料夾</b><small>IconVault 圖示庫／Original_Shortcuts_Backup 母本</small></div>
+
+<div style="display:flex;gap:8px"><button class="btn ghost" style="padding:7px 12px" id="btnVault">圖示庫</button><button class="btn ghost" style="padding:7px 12px" id="btnBackup">母本</button></div></div>
+
+</div>
+
+</div>
+
+<div class="progress" id="progress"><div class="t"><span id="progText">—</span><span id="progNum"></span></div><div class="bar"><i id="progBar"></i></div></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+
+const $ = id => document.getElementById(id);
+
+const api = () => (window.pywebview && window.pywebview.api) ? window.pywebview.api : null;
+
+const CTX = { desktop: 'ctx-desktop', startmenu: 'ctx-startmenu', taskbar: 'ctx-taskbar' };
+
+let ST = null;            // get_state() 結果
+
+let scope = 'taskbar';
+
+let cfg = {};             // 各區目前參數
+
+let seq = 0, busy = false, initDone = false;
+
+const previewCache = {};  // scope|json -> payload
+
+let pvTimer = null, saveTimer = null, toastTimer = null, pollTimer = null, telemTimer = null;
+
+function toast(msg, good = true, ms = 3800) {
+
+  const t = $('toast'); t.textContent = (good ? '✨ ' : '⚠️ ') + msg; t.classList.add('show');
+
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+
+}
+
+const dpr = () => Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+
+const fmt = v => Number(v).toFixed(2);
+
+// ---------- 建 UI（一次） ----------
+
+const isWhAvailable = () => !!(ST && (ST.windhawk_installed || (ST.taskbar_engine && ST.taskbar_engine.windhawk_installed) || (ST.startmenu_engine && ST.startmenu_engine.windhawk_installed)));
+
+const scopeNeedsWh = id => !!(ST && ST.specs && ST.specs[id] && ST.specs[id].requires_windhawk);
+
+function updateBatchUI() {
+
+  const whOk = isWhAvailable();
+
+  if ($('batchNote')) {
+
+    $('batchNote').textContent = whOk
+
+      ? '一次套用或還原：工作列、開始功能表、桌面'
+
+      : '未偵測到 Windhawk，批次控制僅執行獨立的「桌面區」';
+
+  }
+
+  if ($('btnApplyAll')) {
+
+    $('btnApplyAll').textContent = whOk ? '✨ 一鍵套用全部三區' : '✨ 一鍵套用可用區域（桌面）';
+
+  }
+
+  if ($('btnRestoreAll')) {
+
+    $('btnRestoreAll').textContent = whOk ? '🛡️ 一鍵還原全部三區' : '🛡️ 一鍵還原可用區域（桌面）';
+
+  }
+
+  if ($('swRestoreOnExit') && $('restoreOnExitRow')) {
+
+    $('swRestoreOnExit').disabled = !whOk;
+
+    $('restoreOnExitRow').style.opacity = whOk ? '1' : '.48';
+
+    $('restoreOnExitRow').style.pointerEvents = whOk ? '' : 'none';
+
+  }
+
+}
+
+function updateScopeControls() {
+
+  if (!ST || !ST.specs[scope]) return;
+
+  const s = ST.specs[scope];
+
+  const isWh = (scope === 'taskbar' || scope === 'startmenu');
+
+  const whMissing = scopeNeedsWh(scope) && !isWhAvailable();
+
+  if ($('whOptionalBox')) $('whOptionalBox').classList.toggle('show', whMissing);
+
+  if ($('visualAdvisoryBox')) {
+
+    const adv = s.advisory || '';
+
+    $('visualAdvisoryBox').textContent = adv;
+
+    $('visualAdvisoryBox').classList.toggle('show', Boolean(adv));
+
+  }
+
+  if (whMissing) {
+
+    $('btnApplyScope').textContent = `🔌 需先安裝 Windhawk 才能啟用「${s.label}」`;
+
+    $('btnRestoreScope').textContent = `🛡️ 尚未安裝 Windhawk`;
+
+  } else {
+
+    $('btnApplyScope').textContent = isWh ? `✨ 套用並啟用「${s.label}」即時 Liquid Glass` : `✨ 套用「${s.label}」光學液態玻璃`;
+
+    $('btnRestoreScope').textContent = `🛡️ 還原「${s.label}」原生圖示`;
+
+  }
+
+  $('btnApplyScope').disabled = busy || whMissing;
+
+  $('btnRestoreScope').disabled = busy || whMissing;
+
+}
+
+function buildTabs() {
+
+  const box = $('tabs'); box.innerHTML = '';
+
+  const whOk = isWhAvailable();
+
+  for (const id of ST.scopes) {
+
+    const s = ST.specs[id];
+
+    const locked = !!s.locked;
+
+    const optOff = !locked && scopeNeedsWh(id) && !whOk;
+
+    const b = document.createElement('button');
+
+    b.type = 'button';
+
+    b.className = 'tab' + (locked ? ' locked' : (optOff ? ' optional-off' : '')) + (id === scope ? ' active' : '');
+
+    b.dataset.scope = id;
+
+    if (locked) {
+
+      b.disabled = true;
+
+      b.setAttribute('aria-disabled', 'true');
+
+      b.innerHTML = `<b>${s.icon} ${s.label}</b><span>🔒 暫未開放（已封鎖）</span>`;
+
+    } else {
+
+      const subText = optOff ? '🔌 Windhawk 選用擴充（未安裝）' : s.style;
+
+      b.innerHTML = `<b>${s.icon} ${s.label}</b><span>${subText}</span>`;
+
+      b.addEventListener('click', () => selectScope(id));
+
+    }
+
+    box.appendChild(b);
+
+  }
+
+}
+
+function renderSliders() {
+
+  const s = ST.specs[scope], box = $('sliders'); box.innerHTML = '';
+
+  for (const p of s.params) {
+
+    const row = document.createElement('div'); row.className = 'row';
+
+    row.innerHTML = `<div class="lbl"><b>${p.label}</b><small>${scope === 'desktop' && /scale|size|ratio|icon/i.test(p.key) ? 'Squircle 滿版內接比例（預設 0.80）｜' : ''}${p.desc}</small></div>
+
+<div class="sl"><input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${cfg[scope][p.key]}" data-key="${p.key}">
+
+<span class="val">${fmt(cfg[scope][p.key])}</span></div>`;
+
+    box.appendChild(row);
+
+  }
+
+}
+
+function selectScope(id) {
+
+  if (!ST || !ST.specs[id] || ST.specs[id].locked) return;
+
+  scope = id;
+
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.scope === id));
+
+  const s = ST.specs[id];
+
+  $('scopeSum').innerHTML = `<b>${s.style}</b>　${s.summary}`;
+
+  $('slTitle').textContent = `${s.label}・調校`;
+
+  $('pvActCap').textContent = `實際尺寸（${s.actual_px}px，已依螢幕縮放比例 ${Math.round(dpr()*100)}% 渲染）`;
+
+  $('adminHint').style.display = (id === 'desktop' && !ST.is_admin) ? 'block' : 'none';
+
+  if ($('adminRetry')) $('adminRetry').style.display = 'none';
+
+  const isWh = (id === 'taskbar' || id === 'startmenu');
+
+  if ($('engineCard')) $('engineCard').style.display = isWh ? 'block' : 'none';
+
+  updateScopeControls();
+
+  if (isWh) {
+
+    renderEngineTelemetry(id === 'startmenu' ? ST.startmenu_engine : ST.taskbar_engine, id);
+
+  }
+
+  renderSliders();
+
+  requestPreview(true);
+
+}
+
+// ---------- 預覽（非同步 + 序號防抖，丟棄過期結果） ----------
+
+function showPreview(p) {
+
+  const ctx = CTX[p.scope];
+
+  $('pvBig').innerHTML = p.big.map(u => `<img src="${u}" width="${p.big_css}" height="${p.big_css}" alt="">`).join('');
+
+  $('pvAct').className = 'pv-row small ' + ctx;
+
+  $('pvAct').innerHTML = p.actual.map(u => `<img src="${u}" width="${p.actual_css}" height="${p.actual_css}" alt="">`).join('');
+
+  $('pvBig').classList.remove('pv-loading');
+
+}
+
+function requestPreview(immediate) {
+
+  const a = api(); if (!a) return;
+
+  clearTimeout(pvTimer);
+
+  const go = () => {
+
+    const key = scope + '|' + JSON.stringify(cfg[scope]);
+
+    if (previewCache[key]) { showPreview(previewCache[key]); return; }
+
+    const my = ++seq, sc = scope;
+
+    $('pvBig').classList.add('pv-loading');
+
+    a.preview(sc, cfg[sc], dpr(), my).then(res => {
+
+      if (!res || res.error) return;
+
+      previewCache[sc + '|' + JSON.stringify(cfg[sc])] = res;
+
+      if (my === seq && sc === scope) showPreview(res);   // 過期結果直接丟棄
+
+    });
+
+  };
+
+  if (immediate) go(); else pvTimer = setTimeout(go, 90);
+
+}
+
+function scheduleSave() {
+
+  clearTimeout(saveTimer);
+
+  saveTimer = setTimeout(() => { const a = api(); if (a) a.save_params(scope, cfg[scope]); }, 600);
+
+}
+
+// ---------- 套用 / 還原 ----------
+
+function setBusy(b) {
+
+  busy = b;
+
+  document.body.classList.toggle('busy', !!b);
+
+  const whMissing = scopeNeedsWh(scope) && !isWhAvailable();
+
+  if ($('btnApplyScope')) $('btnApplyScope').disabled = b || whMissing;
+
+  if ($('btnRestoreScope')) $('btnRestoreScope').disabled = b || whMissing;
+
+  if ($('btnAdminRetry')) $('btnAdminRetry').disabled = b;
+
+  const lockAll = !!(ST && ST.locked_scopes && ST.locked_scopes.length > 0);
+
+  ['btnApplyAll','btnRestoreAll'].forEach(id => { if ($(id)) $(id).disabled = b || lockAll; });
+
+  $('progress').classList.toggle('show', b);
+
+  if (b) { clearInterval(pollTimer); pollTimer = setInterval(poll, 250); poll(); }
+
+  else { clearInterval(pollTimer); }
+
+}
+
+function poll() {
+
+  const a = api(); if (!a) return;
+
+  a.get_progress().then(p => {
+
+    if (!p) return;
+
+    const lab = p.scope && ST.specs[p.scope] ? ST.specs[p.scope].label : '';
+
+    $('progText').textContent = [lab, p.phase].filter(Boolean).join('・') || '處理中…';
+
+    $('progNum').textContent = p.total ? `${p.done}/${p.total}` : '';
+
+    $('progBar').style.width = p.total ? Math.min(100, p.done / p.total * 100) + '%' : '8%';
+
+  });
+
+}
+
+let lastAdminKind = 'apply';
+
+function showAdminRetry(count, kind) {
+  if (kind) lastAdminKind = kind;
+  const box = $('adminRetry');
+  if (!box) return;
+  const n = Number(count) || 0;
+  box.style.display = n > 0 ? 'block' : 'none';
+  if (n > 0) {
+    const act = lastAdminKind === 'restore' ? '還原' : '套用';
+    if ($('btnAdminRetry')) $('btnAdminRetry').textContent = `🛡️ 以系統管理員權限重試 ${n} 個公用捷徑（${act}）`;
+  }
+}
+
+$('btnAdminRetry').addEventListener('click', () => {
+  const a = api();
+  if (!a || busy) return;
+  const startedAt = Date.now() / 1000 - 1;
+  setBusy(true);
+  toast('正在要求 Windows UAC 權限，請在系統視窗點「是」…', true, 4000);
+  const fn = lastAdminKind === 'restore' ? 'restore_admin' : 'apply_admin';
+  a[fn](scope).then(r => {
+    if (!r || !r.ok) {
+      setBusy(false);
+      toast((r && r.message) || '未取得管理員權限', false, 6000);
+      return refreshStatus();
+    }
+    let tries = 0;
+    const waitAdmin = setInterval(() => {
+      tries += 1;
+      if (!a.get_admin_result) {
+        clearInterval(waitAdmin); setBusy(false); return;
+      }
+      a.get_admin_result().then(ar => {
+        if (ar && ar.time && Number(ar.time) >= startedAt) {
+          clearInterval(waitAdmin);
+          setBusy(false);
+          showAdminRetry(0);
+          toast(ar.message || '公用捷徑提權處理完成', true, 7000);
+          refreshStatus();
+        } else if (tries >= 24) {
+          clearInterval(waitAdmin);
+          setBusy(false);
+          toast('提權請求已送出，請稍後確認桌面圖示或重試', true, 5000);
+          refreshStatus();
+        }
+      }).catch(() => {});
+    }, 600);
+  }).catch(e => {
+    setBusy(false);
+    toast('管理員重試發生錯誤：' + e, false, 7000);
+  });
+});
+
+function run(promiseFn, startMsg) {
+
+  const a = api(); if (!a || busy) return;
+
+  setBusy(true); toast(startMsg, true, 2000);
+
+  promiseFn(a).then(r => {
+
+    setBusy(false);
+
+    toast(r.message || '完成', r.ok !== false && !/失敗|權限不足|需要系統管理員/.test(r.message || ''), 7000);
+    if (r && typeof r.needs_admin !== 'undefined') showAdminRetry(r.needs_admin, r.kind);
+    if (r && r.windhawk_needs_admin && !r.ok && $('elevateBanner')) {
+      $('elevateBanner').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    refreshStatus();
+
+    setTimeout(refreshStatus, 700);
+
+    setTimeout(refreshStatus, 1800);
+
+  }).catch(e => { setBusy(false); toast('發生錯誤：' + e, false, 7000); });
+
+}
+
+$('btnApplyScope').addEventListener('click', () => {
+
+  if (ST && ST.specs[scope] && ST.specs[scope].locked) return;
+
+  run(a => a.apply_scope(scope, cfg[scope]), `正在套用「${ST.specs[scope].label}」…`);
+
+});
+
+$('btnRestoreScope').addEventListener('click', () => {
+
+  if (ST && ST.specs[scope] && ST.specs[scope].locked) return;
+
+  run(a => a.restore_scope(scope), `正在還原「${ST.specs[scope].label}」…`);
+
+});
+
+$('btnApplyAll').addEventListener('click', () => {
+
+  const msg = isWhAvailable() ? '正在套用全部三區 Liquid Glass…' : '正在套用桌面 Liquid Glass…';
+
+  run(a => a.apply_all(cfg), msg);
+
+});
+
+$('btnRestoreAll').addEventListener('click', () => {
+
+  const msg = isWhAvailable() ? '正在還原全部三區原生圖示…' : '正在還原桌面原生圖示…';
+
+  run(a => a.restore_all(), msg);
+
+});
+
+if ($('btnCopyWhUrl')) {
+
+  $('btnCopyWhUrl').addEventListener('click', () => {
+
+    const url = ($('whUrlText') && $('whUrlText').textContent) || 'https://windhawk.net/';
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+
+      navigator.clipboard.writeText(url).then(() => toast('已複製 Windhawk 官網網址：' + url)).catch(() => toast('請手動選取網址複製：' + url));
+
+    } else {
+
+      toast('請手動選取網址複製：' + url);
+
+    }
+
+  });
+
+}
+
+if ($('btnRecheckWh')) {
+
+  $('btnRecheckWh').addEventListener('click', () => {
+
+    refreshStatus().then(() => {
+
+      toast(isWhAvailable() ? '已偵測到 Windhawk，工作列／開始功能表選用擴充已解鎖！' : '仍未偵測到 Windhawk（請確認已安裝於 C:\\Windhawk 或 C:\\Program Files\\Windhawk）', isWhAvailable(), 4500);
+
+    });
+
+  });
+
+}
+
+$('sliders').addEventListener('input', e => {
+
+  const el = e.target; if (el.type !== 'range') return;
+
+  const v = parseFloat(el.value); cfg[scope][el.dataset.key] = v;
+
+  el.parentElement.querySelector('.val').textContent = fmt(v);
+
+  requestPreview(false); scheduleSave();
+
+});
+
+$('btnReset').addEventListener('click', () => {
+
+  ST.specs[scope].params.forEach(p => cfg[scope][p.key] = p.default);
+
+  renderSliders(); requestPreview(true); scheduleSave();
+
+});
+
+function bindSwitch(id, fn, onMsg, offMsg) {
+
+  $(id).addEventListener('change', e => {
+
+    const a = api(); if (!a) return;
+
+    const on = e.target.checked;
+
+    a[fn](on).then(ok => { if (ok !== true && ok !== on) { e.target.checked = !on; toast('操作失敗', false); } else toast(on ? onMsg : offMsg); });
+
+  });
+
+}
+
+bindSwitch('swAutostart', 'set_autostart', '已開啟開機自動啟動（背景常駐）', '已關閉開機自動啟動');
+
+bindSwitch('swShortcut', 'set_shortcut', '已於桌面建立 Liquid Glass 捷徑', '已從桌面移除捷徑');
+
+bindSwitch('swWatcher', 'set_watcher', '已開啟桌面捷徑即時監聽', '已關閉桌面捷徑即時監聽');
+
+if ($('swExitOnClose')) bindSwitch('swExitOnClose', 'set_exit_on_close', '關閉設定視窗時將直接結束程式（不再常駐背景）', '關閉設定視窗後維持背景系統匣常駐');
+
+if ($('swRestoreOnExit')) bindSwitch('swRestoreOnExit', 'set_restore_on_exit', '已開啟退出程式時自動還原即時工作列與開始功能表', '已關閉退出自動還原（關閉程式仍維持外觀）');
+
+$('btnVault').addEventListener('click', () => api() && api().open_folder('vault'));
+
+$('btnBackup').addEventListener('click', () => api() && api().open_folder('backup'));
+
+function renderEngineTelemetry(st, sc = scope) {
+
+  const isSm = (sc === 'startmenu');
+
+  if ($('engCardTitle')) $('engCardTitle').textContent = isSm ? '開始功能表即時光學引擎' : '工作列即時光學引擎';
+
+  if ($('engBtnsLabel')) $('engBtnsLabel').textContent = isSm ? '已追蹤圖示／渲染' : '已追蹤按鈕／渲染';
+
+  if (!st) return;
+
+  const badge = $('engBadge');
+
+  const t = st.telemetry;
+
+  if (!st.windhawk_installed) {
+
+    $('engWh').textContent = '未偵測（請先安裝 Windhawk）';
+
+    if (badge) {
+
+      badge.textContent = '未安裝';
+
+      badge.className = 'eng-pill off';
+
+    }
+
+  } else {
+
+    const wh = st.windhawk_running ? '執行中' : '未啟動';
+
+    const modeTag = st.storage_mode === 'registry' ? '・系統安裝版' : '';
+
+    $('engWh').textContent = wh + modeTag + (st.dll_exists ? '（模組已就緒）' : '（待編譯）');
+
+    if (badge) {
+
+      const active = !!(st.enabled && t && t.active);
+
+      badge.textContent = active ? '運行中' : (st.enabled ? '啟動中…' : '未啟用');
+
+      badge.className = 'eng-pill ' + (active ? 'on' : 'off');
+
+    }
+
+  }
+
+  if (t) {
+
+    const unit = isSm ? '顆圖示' : '顆按鈕';
+
+    $('engBtns').textContent = `${t.tracked_buttons || 0} ${unit}｜渲染 ${t.render_count || 0} 次 / 命中 ${t.cache_hits || 0}`;
+
+    const mb = ((t.cache_bytes || 0) / (1024 * 1024)).toFixed(2);
+
+    const maxMb = ((t.max_cache_bytes || (12 * 1024 * 1024)) / (1024 * 1024)).toFixed(0);
+
+    const maxEnt = t.max_cache_entries || (isSm ? 256 : 64);
+
+    $('engCache').textContent = `${t.cache_entries || 0}/${maxEnt} 筆（${mb} / ${maxMb} MB）`;
+
+    $('engLowRes').textContent = `${t.low_res_count || 0} 顆低解析圖示`;
+
+  } else {
+
+    const defMaxEnt = isSm ? 256 : 64;
+
+    const defMaxMb = 12;
+
+    $('engBtns').textContent = '尚未收到回報';
+
+    $('engCache').textContent = `0/${defMaxEnt} 筆（0.00 / ${defMaxMb} MB）`;
+
+    $('engLowRes').textContent = '—';
+
+  }
+
+}
+
+function pollEngineStatus() {
+
+  if (document.hidden || !isWhAvailable()) return Promise.resolve(null);
+
+  const a = api(); if (!a) return Promise.resolve(null);
+
+  const sc = scope;
+
+  if (sc !== 'taskbar' && sc !== 'startmenu') return Promise.resolve(null);
+
+  const req = a.get_engine_status ? a.get_engine_status(sc) : (sc === 'taskbar' && a.get_taskbar_status ? a.get_taskbar_status() : null);
+
+  if (!req) return Promise.resolve(null);
+
+  return req.then(st => {
+
+    if (ST) {
+
+      if (sc === 'startmenu') ST.startmenu_engine = st;
+
+      else ST.taskbar_engine = st;
+
+    }
+
+    if (scope === sc) renderEngineTelemetry(st, sc);
+
+    return st;
+
+  }).catch(() => null);
+
+}
+
+function updateElevateUI(s) {
+
+  const adm = !!(s && s.is_admin);
+
+  if ($('elevateBanner')) $('elevateBanner').classList.toggle('show', !adm);
+
+  if ($('adminPill')) $('adminPill').classList.toggle('show', adm);
+
+}
+
+if ($('btnElevateRelaunch')) {
+
+  $('btnElevateRelaunch').addEventListener('click', () => {
+
+    const a = api(); if (!a) return;
+
+    const btn = $('btnElevateRelaunch');
+
+    const orig = btn.textContent;
+
+    btn.disabled = true;
+
+    btn.textContent = '等待系統授權…';
+
+    Promise.resolve(a.relaunch_admin(scope || 'taskbar')).then(r => {
+
+      if (r && r.ok) {
+
+        btn.textContent = '正在重啟…';
+
+        toast(r.message || '正在以系統管理員身分重新啟動…');
+
+      } else {
+
+        btn.disabled = false;
+
+        btn.textContent = orig;
+
+        toast((r && r.message) || '未取得系統管理員權限', 3800);
+
+        refreshStatus();
+
+      }
+
+    }).catch(e => {
+
+      btn.disabled = false;
+
+      btn.textContent = orig;
+
+      toast('重啟請求失敗：' + e, 3800);
+
+    });
+
+  });
+
+}
+
+let _lastWhAvail = null;
+
+function renderStatusPill(s) {
+
+  if (!s) return;
+
+  const tb = s.taskbar_engine || {};
+
+  const sm = s.startmenu_engine || {};
+
+  const tbOn = !!(tb.enabled && tb.telemetry && tb.telemetry.active);
+
+  const smOn = !!(sm.enabled && sm.telemetry && sm.telemetry.active);
+
+  if (!isWhAvailable()) {
+
+    $('status').textContent = `僅桌面模式（未安裝 Windhawk）｜${s.backup_count} 母本`;
+
+  } else {
+
+    const tbTxt = tbOn ? `工作列 ${(tb.telemetry && tb.telemetry.tracked_buttons) || 0}` : '工作列待機';
+
+    const smTxt = smOn ? `選單 ${(sm.telemetry && sm.telemetry.tracked_buttons) || 0}` : '選單待機';
+
+    $('status').textContent = `${tbTxt}・${smTxt}｜${s.backup_count} 母本`;
+
+  }
+
+  if (scope === 'taskbar' || scope === 'startmenu') {
+
+    renderEngineTelemetry(scope === 'startmenu' ? sm : tb, scope);
+
+  }
+
+}
+
+function refreshStatus() {
+
+  const a = api(); if (!a) return Promise.resolve(null);
+
+  return a.get_state().then(s => {
+
+    ST = s;
+
+    updateElevateUI(s);
+
+    const curWh = isWhAvailable();
+
+    if (_lastWhAvail !== curWh) {
+
+      _lastWhAvail = curWh;
+
+      buildTabs();
+
+    }
+
+    updateBatchUI();
+
+    updateScopeControls();
+
+    renderStatusPill(s);
+
+  });
+
+}
+
+// ---------- 初始化（只跑一次） ----------
+
+function initUI() {
+
+  if (initDone) return; const a = api(); if (!a) return;
+
+  initDone = true;
+
+  const getStartScope = a.get_startup_scope ? a.get_startup_scope() : Promise.resolve('');
+
+  Promise.all([a.get_state(), Promise.resolve(getStartScope)]).then(([s, startScope]) => {
+
+    ST = s; cfg = JSON.parse(JSON.stringify(s.config));
+
+    _lastWhAvail = isWhAvailable();
+
+    updateElevateUI(s);
+
+    $('ver').textContent = 'v' + s.version;
+
+    $('swAutostart').checked = !!s.autostart; $('swShortcut').checked = !!s.shortcut;
+
+    $('swWatcher').checked = !!s.watcher; $('swWatcher').disabled = !!s.watcher_locked;
+
+    if ($('swExitOnClose')) $('swExitOnClose').checked = !!s.exit_on_close;
+
+    if ($('swRestoreOnExit')) $('swRestoreOnExit').checked = !!s.restore_on_exit;
+
+    if ($('watcherRow')) {
+
+      $('watcherRow').style.opacity = s.watcher_locked ? '.48' : '1';
+
+      $('watcherRow').style.pointerEvents = s.watcher_locked ? 'none' : '';
+
+    }
+
+    buildTabs();
+
+    updateBatchUI();
+
+    const preferred = (startScope && s.specs[startScope] && !s.specs[startScope].locked)
+
+      ? startScope
+
+      : ((s.default_scope && s.specs[s.default_scope] && !s.specs[s.default_scope].locked) ? s.default_scope : 'desktop');
+
+    selectScope(preferred);
+
+    renderStatusPill(s);
+
+    setBusy(false);
+
+    refreshStatus();
+
+    clearInterval(telemTimer);
+
+    telemTimer = setInterval(pollEngineStatus, 4000);
+
+  });
+
+}
+
+document.addEventListener('visibilitychange', () => {
+
+  if (!document.hidden && initDone) pollEngineStatus();
+
+});
+
+window.addEventListener('pywebviewready', initUI);
+
+// 保險：若 pywebviewready 已在腳本註冊前觸發
+
+if (window.pywebview && window.pywebview.api) initUI();
+
+</script>
+
+</body>
+
+</html>

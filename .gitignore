@@ -1,0 +1,36 @@
+# Environments & secrets
+.env
+.venv/
+venv/
+env/
+
+# Python cache & tests
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# PyInstaller build artifacts & release packages
+build/
+dist/
+_internal/
+releases/
+*.exe
+*.zip
+
+# Local user runtime data, backups & WebView2 profiles (privacy protection)
+IconVault/
+Original_Shortcuts_Backup/
+config.json
+admin_last_result.json
+.webview_profile/
+.webview_profile_admin/
+
+# Logs & temporary files
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
