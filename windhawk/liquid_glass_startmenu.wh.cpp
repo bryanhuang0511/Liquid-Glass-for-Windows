@@ -79,6 +79,7 @@ namespace wss = winrt::Windows::Storage::Streams;
 namespace wuc = winrt::Windows::UI::Core;
 namespace wux = winrt::Windows::UI::Xaml;
 namespace wuxc = winrt::Windows::UI::Xaml::Controls;
+namespace wuxcp = winrt::Windows::UI::Xaml::Controls::Primitives;
 namespace wuxm = winrt::Windows::UI::Xaml::Media;
 namespace wuxmi = winrt::Windows::UI::Xaml::Media::Imaging;
 
@@ -141,6 +142,7 @@ struct SbsRecord {
     uint64_t lastGlassPremulHash = 0;
     uint32_t appliedGeneration = 0;
     bool approvedAppIcon = false;
+    bool disallowedUiIcon = false;
     bool captureInFlight = false;
     uint32_t captureAttemptedGen = 0;
 };
@@ -181,6 +183,7 @@ std::atomic<int> g_pendingAsyncOps{0};
 std::atomic<int> g_activeRtbCount{0};
 std::atomic<bool> g_hookInstalled{false};
 std::atomic<uint64_t> g_lastWalkTick{0};
+std::atomic<uint64_t> g_pendingTrailingScanTick{0};
 
 std::unordered_map<void*, SbsRecord> g_sbsMap;
 std::unordered_map<void*, ImgRecord> g_imgMap;
@@ -1118,7 +1121,9 @@ int32_t WINAPI SetBitmapAsync_Hook(void* pThis, void* pBitmap, void** ppAsyncAct
                     rec.appliedGeneration = 0;
                     rec.lastGlassPremulHash = 0;
                     rec.captureInFlight = false;
-                    shouldTransformInline = (rec.approvedAppIcon && cfg.enabled);
+                    const bool iconSized = (rec.origBgra.width >= 16 && rec.origBgra.height >= 16 &&
+                                            rec.origBgra.width <= 256 && rec.origBgra.height <= 256);
+                    shouldTransformInline = (!rec.disallowedUiIcon && (rec.approvedAppIcon || iconSized) && cfg.enabled);
                 }
                 PruneMapsLocked();
             }
@@ -1154,6 +1159,11 @@ int32_t WINAPI SetBitmapAsync_Hook(void* pThis, void* pBitmap, void** ppAsyncAct
                         }
                     }
                 }
+            } else if (!isEcho && cfg.enabled) {
+                // Newly created SoftwareBitmapSource (e.g. inside an opening folder modal/popup)
+                // hasn't been visited by WalkSubtree yet; schedule a trailing UI tree scan.
+                g_pendingTrailingScanTick.store(GetTickCount64(), std::memory_order_release);
+                g_cv.notify_all();
             }
         }
     } catch (...) {
@@ -1209,26 +1219,16 @@ bool ContainsNoCase(const std::wstring& hay, const wchar_t* needle) {
     return false;
 }
 
-bool IsApprovedStartMenuIconImage(const wuxc::Image& img) {
-    if (!img) return false;
+bool IsDisallowedStartMenuUiImage(const wuxc::Image& img) {
+    if (!img) return true;
     try {
         std::wstring nm(img.Name());
         if (nm == L"SearchIconOff" || nm == L"SearchIconOn" ||
             nm == L"PlaceholderIcon" || nm == L"SearchBoxOnTaskbarGleamImage") {
-            return false;
+            return true;
         }
-
-        double aw = img.ActualWidth();
-        double ah = img.ActualHeight();
-        if (aw > 0.0 && ah > 0.0 && (aw < 10.0 || ah < 10.0 || aw > 128.0 || ah > 128.0)) {
-            return false;
-        }
-
-        bool nameMatched = (nm == L"Logo" || nm == L"AllAppsItemLogo" || nm == L"AllAppsTileLogo");
-        bool parentMatched = false;
-
         wux::DependencyObject cur = img;
-        for (int depth = 0; depth < 9 && cur; ++depth) {
+        for (int depth = 0; depth < 16 && cur; ++depth) {
             cur = wuxm::VisualTreeHelper::GetParent(cur);
             if (!cur) break;
             std::wstring pCls(winrt::get_class_name(cur));
@@ -1237,12 +1237,54 @@ bool IsApprovedStartMenuIconImage(const wuxc::Image& img) {
                 pName = fe.Name();
             }
             if (ContainsNoCase(pName, L"UserTile") || ContainsNoCase(pCls, L"UserTile") ||
-                ContainsNoCase(pCls, L"AccountControl") || ContainsNoCase(pCls, L"SearchBox") ||
+                ContainsNoCase(pCls, L"AccountControl") || ContainsNoCase(pCls, L"PersonPicture") ||
+                ContainsNoCase(pName, L"PersonPicture") || ContainsNoCase(pCls, L"SearchBox") ||
                 ContainsNoCase(pName, L"SearchBox") || ContainsNoCase(pCls, L"Cortana") ||
                 ContainsNoCase(pName, L"RightCompanion")) {
-                return false;
+                return true;
             }
-            if (depth <= 1 && (pName == L"LogoContainer" || pName == L"LogoBackgroundPlate")) {
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool IsApprovedStartMenuIconImage(const wuxc::Image& img) {
+    if (!img || IsDisallowedStartMenuUiImage(img)) return false;
+    try {
+        std::wstring nm(img.Name());
+
+        double aw = img.ActualWidth();
+        double ah = img.ActualHeight();
+        if (aw > 0.0 && ah > 0.0 && (aw < 10.0 || ah < 10.0 || aw > 128.0 || ah > 128.0)) {
+            return false;
+        }
+
+        bool nameMatched = (nm == L"Logo" || nm == L"AllAppsItemLogo" || nm == L"AllAppsTileLogo" ||
+                            nm == L"AppListItemLogo" || nm == L"FolderItemLogo" || nm == L"TileLogo" ||
+                            nm == L"AppIcon");
+        bool parentMatched = false;
+
+        wux::DependencyObject cur = img;
+        for (int depth = 0; depth < 16 && cur; ++depth) {
+            cur = wuxm::VisualTreeHelper::GetParent(cur);
+            if (!cur) break;
+            std::wstring pCls(winrt::get_class_name(cur));
+            std::wstring pName;
+            if (auto fe = cur.try_as<wux::FrameworkElement>()) {
+                pName = fe.Name();
+            }
+            if (depth <= 2 && (pName == L"LogoContainer" || pName == L"LogoBackgroundPlate" ||
+                               pName == L"LogoBorder" || pName == L"LogosContainer")) {
+                parentMatched = true;
+            }
+            if (ContainsNoCase(pCls, L"FolderModal") || ContainsNoCase(pName, L"FolderModal") ||
+                ContainsNoCase(pCls, L"ExpandedFolder") || ContainsNoCase(pName, L"ExpandedFolder") ||
+                ContainsNoCase(pName, L"FolderList") || ContainsNoCase(pName, L"FolderRegion") ||
+                ContainsNoCase(pCls, L"PinnedListTile") || ContainsNoCase(pCls, L"UniversalTileContainer") ||
+                ContainsNoCase(pName, L"LogosItemsControl") || ContainsNoCase(pCls, L"GridViewItem") ||
+                ContainsNoCase(pCls, L"ListViewItem")) {
                 parentMatched = true;
             }
         }
@@ -1430,7 +1472,7 @@ void StartSingleRtbCapture(const CaptureTask& task) {
     try {
         if (img.Visibility() != wux::Visibility::Visible ||
             img.ActualWidth() < 8.0 || img.ActualHeight() < 8.0 || !img.Source()) {
-            ClearCaptureInFlightFlag(task);
+            ClearCaptureInFlightFlag(task, true);
             return;
         }
 
@@ -1524,7 +1566,7 @@ void StartSingleRtbCapture(const CaptureTask& task) {
                         RawImage straight;
                         if (!ExtractStraightFromBuffer(buf, static_cast<uint32_t>(pw), static_cast<uint32_t>(ph), true, straight)) {
                             g_rtbFail.fetch_add(1, std::memory_order_relaxed);
-                            ClearCaptureInFlightFlag(task);
+                            ClearCaptureInFlightFlag(task, true);
                             finishKeep();
                             return;
                         }
@@ -1772,12 +1814,41 @@ void ProcessImageElement(const wuxc::Image& img, const OpticalSettings& cfg, boo
 }
 
 void WalkSubtree(const wux::DependencyObject& node, const OpticalSettings& cfg, bool allowCapture, int depth, int& count) {
-    if (!node || depth > 48 || count >= 6500 || g_unloading.load(std::memory_order_acquire)) return;
+    if (!node || depth > 64 || count >= 20000 || g_unloading.load(std::memory_order_acquire)) return;
     ++count;
     try {
         if (auto img = node.try_as<wuxc::Image>()) {
-            if (IsApprovedStartMenuIconImage(img)) {
+            if (IsDisallowedStartMenuUiImage(img)) {
+                if (auto src = img.Source()) {
+                    if (auto sbs = src.try_as<wuxmi::SoftwareBitmapSource>()) {
+                        if (void* sbsKey = GetCanonicalUnknown(reinterpret_cast<IUnknown*>(winrt::get_abi(sbs)))) {
+                            RawImage restoreOrig;
+                            {
+                                std::lock_guard<std::mutex> lock(g_stateMutex);
+                                auto& srec = g_sbsMap[sbsKey];
+                                srec.disallowedUiIcon = true;
+                                srec.approvedAppIcon = false;
+                                if (srec.appliedGeneration != 0 && !srec.origBgra.bgra.empty()) {
+                                    restoreOrig = srec.origBgra;
+                                    srec.appliedGeneration = 0;
+                                    srec.lastGlassPremulHash = 0;
+                                }
+                            }
+                            if (!restoreOrig.bgra.empty()) {
+                                RawImage origPremul;
+                                StraightToPremul(restoreOrig, origPremul);
+                                ApplyPixelsToSbs(sbs, origPremul);
+                            }
+                        }
+                    }
+                }
+            } else if (IsApprovedStartMenuIconImage(img)) {
                 ProcessImageElement(img, cfg, allowCapture);
+            }
+        }
+        if (auto pu = node.try_as<wuxcp::Popup>()) {
+            if (auto ch = pu.Child()) {
+                WalkSubtree(ch, cfg, allowCapture, depth + 1, count);
             }
         }
         int c = wuxm::VisualTreeHelper::GetChildrenCount(node);
@@ -1790,6 +1861,7 @@ void WalkSubtree(const wux::DependencyObject& node, const OpticalSettings& cfg, 
 
 void ScanStartMenuOnUiThread(bool allowCapture) {
     if (g_unloading.load(std::memory_order_acquire)) return;
+    g_pendingTrailingScanTick.store(0, std::memory_order_release);
     OpticalSettings cfg;
     {
         std::lock_guard<std::mutex> lock(g_stateMutex);
@@ -1822,12 +1894,47 @@ void ScanStartMenuOnUiThread(bool allowCapture) {
         if (!win) return;
         int visited = 0;
         if (auto content = win.Content()) {
-            WalkSubtree(content, cfg, allowCapture, 0, visited);
+            wux::DependencyObject topRoot = content;
+            for (int up = 0; up < 16; ++up) {
+                auto parent = wuxm::VisualTreeHelper::GetParent(topRoot);
+                if (!parent) break;
+                topRoot = parent;
+            }
+            WalkSubtree(topRoot, cfg, allowCapture, 0, visited);
+            try {
+                if (auto xr = content.XamlRoot()) {
+                    if (auto xrPopups = wuxm::VisualTreeHelper::GetOpenPopupsForXamlRoot(xr)) {
+                        for (auto const& pu : xrPopups) {
+                            int puVisited = 0;
+                            WalkSubtree(pu, cfg, allowCapture, 0, puVisited);
+                        }
+                    }
+                }
+            } catch (...) {
+            }
         }
         if (auto popups = wuxm::VisualTreeHelper::GetOpenPopups(win)) {
             for (auto const& pu : popups) {
-                WalkSubtree(pu, cfg, allowCapture, 0, visited);
+                int puVisited = 0;
+                WalkSubtree(pu, cfg, allowCapture, 0, puVisited);
             }
+        }
+        // Also apply to any icon-sized SoftwareBitmapSource already captured by SetBitmapAsync_Hook
+        // (such as items inside virtualized or newly expanded inner folders).
+        std::vector<void*> pendingSbsKeys;
+        {
+            std::lock_guard<std::mutex> lock(g_stateMutex);
+            for (const auto& [k, rec] : g_sbsMap) {
+                if (!rec.disallowedUiIcon && !rec.origBgra.bgra.empty() &&
+                    rec.appliedGeneration != cfg.generation &&
+                    rec.origBgra.width >= 16 && rec.origBgra.height >= 16 &&
+                    rec.origBgra.width <= 256 && rec.origBgra.height <= 256) {
+                    pendingSbsKeys.push_back(k);
+                }
+            }
+        }
+        for (void* k : pendingSbsKeys) {
+            ApplyToSbsKey(k, cfg);
         }
         if (allowCapture) {
             PumpColdCaptureQueue();
@@ -1850,10 +1957,14 @@ void AttachCoreUiEventsOnUiThread() {
             g_rootFe = fe;
             g_layoutUpdatedToken = fe.LayoutUpdated([](wf::IInspectable const&, wf::IInspectable const&) {
                 if (g_unloading.load(std::memory_order_acquire)) return;
+                if (!IsStartMenuVisibleOnScreen(g_coreWnd)) return;
                 uint64_t now = GetTickCount64();
                 uint64_t prev = g_lastWalkTick.load(std::memory_order_relaxed);
-                if (now - prev < 120) return;
-                if (!IsStartMenuVisibleOnScreen(g_coreWnd)) return;
+                if (now - prev < 120) {
+                    g_pendingTrailingScanTick.store(now, std::memory_order_release);
+                    g_cv.notify_all();
+                    return;
+                }
                 g_lastWalkTick.store(now, std::memory_order_relaxed);
                 ScanStartMenuOnUiThread(true);
             });
@@ -2041,18 +2152,26 @@ void WorkerLoop() {
             }
         } else {
             bool nowVisible = IsStartMenuVisibleOnScreen(g_coreWnd);
-            if (nowVisible && !wasVisible) {
+            uint64_t nowTick = GetTickCount64();
+            uint64_t lastWalk = g_lastWalkTick.load(std::memory_order_relaxed);
+            uint64_t pendingTick = g_pendingTrailingScanTick.load(std::memory_order_acquire);
+            bool needTrailing = nowVisible && pendingTick != 0 && (nowTick - lastWalk >= 120);
+            bool needPeriodicVisible = nowVisible && (nowTick - lastWalk >= 350);
+            if ((nowVisible && !wasVisible) || needTrailing || needPeriodicVisible) {
                 OpticalSettings cfg;
                 {
                     std::lock_guard<std::mutex> lock(g_stateMutex);
                     cfg = g_settings;
                 }
                 if (cfg.enabled) {
+                    g_lastWalkTick.store(nowTick, std::memory_order_relaxed);
                     RunFromWindowThread(g_coreWnd, [](PVOID) {
                         AttachCoreUiEventsOnUiThread();
                         ScanStartMenuOnUiThread(true);
                     }, nullptr);
                     FlushStatusFile(true);
+                } else {
+                    g_pendingTrailingScanTick.store(0, std::memory_order_release);
                 }
             }
             wasVisible = nowVisible;

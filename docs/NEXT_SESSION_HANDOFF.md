@@ -1,12 +1,21 @@
-# 🧭 Liquid Glass for Windows — 交接紀錄與完成歸檔（v2.1.0 ➔ v2.2.1）
+# 🧭 Liquid Glass for Windows — 交接紀錄與完成歸檔（v2.1.0 ➔ v2.2.2）
 
-> **建立日期**：2026-11-18（`v2.2.1` 修補更新於 2026-11-19）  
-> **目前版本**：`v2.2.1`（已完成四區一鍵套用整併、Windhawk `@id` 表頭相容性修正並發布至 GitHub）  
-> **狀態**：**✅ 全部功能與修補項目皆已驗收並完成歸檔**。
+> **建立日期**：2026-11-18（`v2.2.2` 更新於 2026-11-19）  
+> **目前版本**：`v2.2.2`（已完成開始選單內層資料夾支援、Windhawk 跨機預編譯備援與引導套用流程、Mem Reduct 預設白名單）  
+> **狀態**：**✅ 全部功能與跨機相容修補皆已完成歸檔**。
 
 ---
 
-## ✅ 1. `v2.2.1` 介面表頭相容性小修補（2026-11-19）
+## ✅ 1. `v2.2.2` 開始選單內層資料夾、跨機預編譯備援與引導套用升級（2026-11-19）
+
+- **開始功能表內層展開資料夾圖示轉換（`windhawk/liquid_glass_startmenu.wh.cpp`）**：
+  - 向上追溯至 `RootVisual`（含 `PopupRoot`）、走訪 `Popup.Child()` 與 `GetOpenPopupsForXamlRoot`，並於 `SetBitmapAsync_Hook` 針對 `16..256px` 圖示直接行內轉換（搭配 `IsDisallowedStartMenuUiImage` 自動排除並保護 `UserTile`、`PersonPicture`、`SearchBox` 等非應用圖示），解決點開「所有應用程式」或釘選區內層資料夾（如 `Chrome 應用程式`）時內部圖示未轉換的問題。
+- **Windhawk 跨機器免編譯器預編譯備援與引導套用流程**：
+  - `build.ps1` 自動將編譯好的三區 `.dll` 與 `libc++.whl`、`libunwind.whl`、`windhawk-mod-shim.dll` 封入 `windhawk/prebuilt/`；對方電腦若為 Windhawk 2.0 預設無 `clang++.exe` 環境，自動退回部署隨包預編譯模組。
+  - 新增執行中 `windhawk.exe` 行程路徑反查（`QueryFullProcessImageNameW`）、多磁碟／Scoop 掃描、UI 手動瀏覽選取 `windhawk.exe` 並持久化至 `config.json["windhawk_dir"]`，以及標準安裝版（`Portable=0`）一鍵 UAC 管理員授權套用按鈕。
+- **預設通知列白名單擴充**：`DEFAULT_TRAY_WHITELIST` 預設納入 `memreduct.exe;Mem Reduct`。
+
+## ✅ 2. `v2.2.1` 介面表頭相容性小修補（2026-11-19）
 
 - 修正 `windhawk/liquid_glass_taskbar.wh.cpp`、`windhawk/liquid_glass_startmenu.wh.cpp`、`windhawk/liquid_glass_tray.wh.cpp` 第 2 行表頭 `// @id`，移除多餘 `local@` 前綴並維持儲存檔名使用 `local@*.wh.cpp`／`local@*.ini`，徹底消除 Windhawk 主程式視窗右下角紅字 `Mod id must only contain the following characters: 0-9, a-z, and a hyphen (-)` 並恢復模組名稱／說明／版本顯示。
 - 於 `tests/test_windhawk_bridge.py` 新增 `test_windhawk_source_metadata_matches_windhawk_validator` 單元防呆測試。

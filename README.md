@@ -1,18 +1,18 @@
 # 🧊 Liquid Glass for Windows
 
-> **Windows 11 Real-Time Optical Liquid Glass Icon Hub & Modular Engine (`v2.2.1`)**  
-> Standalone Zero-Dependency Desktop Icon Transformation ・ Optional Windhawk Real-Time Taskbar, Start Menu & System Tray (`^`) Engines ・ Unified 4-Scope Apply-All + Per-Scope Controls ・ Minimize-to-Tray Lifecycle ・ Byte-Exact Shortcut Backup & One-Click Restore
+> **Windows 11 Real-Time Optical Liquid Glass Icon Hub & Modular Engine (`v2.2.2`)**  
+> Standalone Zero-Dependency Desktop Icon Transformation ・ Optional Windhawk Real-Time Taskbar, Start Menu (incl. Inner Folder Modals) & System Tray (`^`) Engines ・ Precompiled Windhawk 2.0 Fallback & Guided Setup ・ Minimize-to-Tray Lifecycle ・ Byte-Exact Shortcut Backup & One-Click Restore
 
 [📘 正體中文完整架構與操作指引 (指引.md)](指引.md) ｜ [📜 更新紀錄 (CHANGELOG.md)](CHANGELOG.md)
 
 ---
 
-## ✨ Highlights (`v2.2.1`)
+## ✨ Highlights (`v2.2.2`)
 
 - **Independent Desktop Core (Zero External Dependencies)**:  
   Generates multi-resolution (`256px` down to `16px`) frosted translucent Liquid Glass `.ico` icons for user & public Desktop shortcuts (`.lnk`, `.url`, and MSIX/AUMID Store apps) with automatic byte-exact backups and stale-backup refresh on app upgrades.
-- **Optional Windhawk Real-Time Extensions (Taskbar, Start Menu & System Tray `^`)**:  
-  Automatically detects **Windhawk** (Portable `C:\Windhawk` INI mode or Standard `Portable=0` HKLM Registry installation). `taskbar`, `startmenu`, and `tray` (系統匣與 `^` 溢位區) render icons directly in GPU/WIC memory (`<= 12 MiB` LRU cache, `0` shortcut files mutated on disk), with `GetTaskbarXamlRoot` cold-start sweeps, `1024px` high-res Electron/PNG icon downsampling (`<= 256px`), and a configurable process exclusion whitelist (`HWiNFO64.exe;HWiNFO32.exe;HWiNFO` by default) to preserve colored telemetry sensors.
+- **Optional Windhawk Real-Time Extensions (Taskbar, Start Menu + Inner Folders & System Tray `^`)**:  
+  Automatically detects **Windhawk** across standard installs (`C:\Program Files\Windhawk`), portable drives (`C:\Windhawk`, `D:\Windhawk`, Scoop), running `windhawk.exe` processes, or user-selected custom paths (`windhawk_dir`), with **bundled precompiled 64-bit `.dll` + `.whl` fallback** so **Windhawk 2.0** setups without `clang++.exe` work out of the box. Renders icons directly in GPU/WIC memory (`<= 12 MiB` LRU cache, `0` shortcut files mutated on disk), covering Start Menu expanded folder modals (`StartFolderModal` / `PopupRoot`), `1024px` high-res Electron/PNG tray icons, and a configurable process exclusion whitelist (`HWiNFO64.exe;HWiNFO32.exe;HWiNFO;memreduct.exe;Mem Reduct` by default).
 - **Unified Four-Scope Apply & Per-Tab Independence**:  
   One-click batch controls (`一鍵套用全部四區` / `一鍵還原全部區域`) manage all four scopes seamlessly together while keeping per-tab parameters, enable/restore switches, and the tray whitelist independently configurable.
 - **Optical Liquid Glass Shader Parity**:  
@@ -33,14 +33,14 @@
 | [`ui/`](ui/README.md) | Control Center UI | Modern PyWebView EdgeChromium dark-glass dashboard with live multi-DPI sample previews, engine telemetry polling, and lifecycle switches. |
 | [`windhawk/`](windhawk/README.md) | Optional C++ Mods | Windhawk mod sources (`liquid_glass_taskbar.wh.cpp`, `liquid_glass_startmenu.wh.cpp`, `liquid_glass_tray.wh.cpp`) auto-compiled via local `clang++.exe`. |
 | [`assets/`](assets/) | Application & Start Assets | App icons (`app.ico`, `app.png`) and optional Windows Start button overlay asset (`start_button/windows11_start_liquid_glass.png`). |
-| [`tests/`](tests/) | Automated Verification | Domain-split `pytest` suite (`90` test cases covering optical math, specs, `.url` round-trip, watcher, Windhawk Registry/INI/metadata, `--check`, and exit lifecycle). |
+| [`tests/`](tests/) | Automated Verification | Domain-split `pytest` suite (`91` test cases covering optical math, specs, `.url` round-trip, watcher, Windhawk Registry/INI/metadata/prebuilt fallback, `--check`, and exit lifecycle). |
 | [`docs/`](docs/ARCHITECTURE.md) | Engineering Docs | System architecture notes, technical root-cause analyses ([`CRASH_REPORT_SystemTray_Overflow.md`](docs/CRASH_REPORT_SystemTray_Overflow.md)), and next-session roadmap ([`NEXT_SESSION_HANDOFF.md`](docs/NEXT_SESSION_HANDOFF.md)). |
 
 ---
 
 ## 🚀 Quick Start (Portable ZIP Release)
 
-1. Download **`LiquidGlassForWindows_v2.2.1_Portable.zip`** from [GitHub Releases](https://github.com/bryanhuang0511/Liquid-Glass-for-Windows/releases).
+1. Download **`LiquidGlassForWindows_v2.2.2_Portable.zip`** from [GitHub Releases](https://github.com/bryanhuang0511/Liquid-Glass-for-Windows/releases).
 2. Extract to a permanent folder (e.g., `D:\Tools\Liquid_Glass_for_Windows`) so Windows shortcut icon paths remain valid.
 3. Double-click **`LiquidGlassForWindows.exe`** (or **`啟動圖示中樞.bat`**).
 4. **Optional Taskbar & Start Menu Real-Time Mode**: Install [Windhawk](https://windhawk.net/), click **「重新偵測 Windhawk」** in the UI, and apply. For best visual contrast, enable Windows Dark Mode or pair with a transparent Windhawk taskbar/start-menu styler.

@@ -7,7 +7,7 @@ from liquid_glass import specs as S
 
 
 def test_config_migration_does_not_pollute_taskbar():
-    assert S.VERSION == "2.2.1"
+    assert S.VERSION == "2.2.2"
     assert S.SCOPES == ("desktop", "startmenu", "taskbar", "tray")
     assert S.SPECS["tray"]["actual_px"] == 20
     assert all(not S.SPECS[sc]["experimental"] for sc in S.SCOPES)

@@ -240,6 +240,13 @@ def test_ui_html_has_wiztree_non_blocking_banner(env):
         "visualAdvisoryBox",
         "btnRecheckWh",
         "btnCopyWhUrl",
+        "btnOpenWhSite",
+        "btnBrowseWh",
+        "txtWhPath",
+        "btnSaveWhPath",
+        "btnChangeWhDir",
+        "engWhPathInfo",
+        "btnWlAddMemReduct",
         "isWhAvailable",
         "optional-off",
         "僅桌面模式",
@@ -426,4 +433,12 @@ def test_tray_whitelist_api_syncs_and_persists(env):
     assert WB.get_status(scope="tray")["ini_settings"]["WhitelistApps"] == "HWiNFO64.exe;HWiNFO;CustomApp.exe"
     saved = json.load(open(RT.CONFIG_PATH, encoding="utf-8"))
     assert saved["tray_whitelist"] == "HWiNFO64.exe;HWiNFO;CustomApp.exe"
+
+    bad_wh = api.set_windhawk_dir(os.path.join(env.home, "NoSuchWindhawk"))
+    assert bad_wh["ok"] is False and "找不到 windhawk.exe" in bad_wh["message"]
+    ok_wh = api.set_windhawk_dir(os.path.join(os.environ["LGFW_WINDHAWK_DIR"], "windhawk.exe"))
+    assert ok_wh["ok"] is True and ok_wh["windhawk_installed"] is True
+    assert json.load(open(RT.CONFIG_PATH, encoding="utf-8"))["windhawk_dir"] == os.path.normpath(os.environ["LGFW_WINDHAWK_DIR"])
+    reset_wh = api.set_windhawk_dir("")
+    assert reset_wh["custom_windhawk_dir"] == ""
 

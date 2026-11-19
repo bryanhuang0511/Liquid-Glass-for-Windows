@@ -2,6 +2,16 @@
 
 All notable changes to **Liquid Glass for Windows** will be documented in this file.
 
+## [v2.2.2] - 2026-11-19
+### Fixed
+- **Start Menu Inner Folder & Modal Icon Transformation (`windhawk/liquid_glass_startmenu.wh.cpp`)**: Fixed icons inside expanded Start Menu folders (`StartMenu.FolderModal#StartFolderModal`, `StartMenu.ExpandedFolderList`, All Apps subfolders such as `Chrome 應用程式`) remaining untransformed. Now walks up to the top XAML `RootVisual` (covering `PopupRoot`), traverses `Popup.Child()` and `GetOpenPopupsForXamlRoot`, transforms icon-sized (`16..256px`) `SoftwareBitmapSource` objects inline inside `SetBitmapAsync_Hook` with automatic UI-element disallow/restore guards (`UserTile`, `AccountControl`, `PersonPicture`, `SearchBox`), resets `captureAttemptedGen` when capturing mid-animation frames, and runs trailing/visible-window scans.
+- **Standard Windhawk (`Portable=0`) Permission Detection**: Compiles temporary `.dll` output in `%TEMP%` before atomically copying to `Engine\Mods\64`, ensuring non-elevated runs on standard `C:\Program Files\Windhawk` installations accurately report `needs_admin` instead of a generic compiler error.
+
+### Added
+- **Bundled Precompiled Windhawk Mods & Runtime Shims (`windhawk/prebuilt/`)**: Automatically stages precompiled 64-bit `.dll` binaries (`taskbar`, `startmenu`, `tray`) and MinGW runtime dependencies (`libc++.whl`, `libunwind.whl`, `windhawk-mod-shim.dll`) during `build.ps1`, enabling zero-compiler fallback on Windhawk 2.0 default installations where local `clang++.exe` is not installed.
+- **Guided Windhawk Detection, Manual Path Binding & One-Click UAC Apply Flow**: Added running `windhawk.exe` path discovery via Win32 `QueryFullProcessImageNameW`, multi-drive/Scoop candidate scanning, persistent custom path binding (`windhawk_dir` in `config.json`, `set_windhawk_dir`, `browse_windhawk_dir`), and a 3-step onboarding card + inline one-click UAC elevation retry button (`#btnAdminRetry`) for Standard Windhawk installations.
+- **Default Notification Area Whitelist Expansion**: Added `memreduct.exe;Mem Reduct` to `DEFAULT_TRAY_WHITELIST` (alongside `HWiNFO64.exe;HWiNFO32.exe;HWiNFO`) and added a `+ Mem Reduct` quick-add button in the UI (`91` total automated tests).
+
 ## [v2.2.1] - 2026-11-19
 ### Fixed
 - **Windhawk Mod Metadata Compatibility (`// @id`)**: Removed the redundant `local@` prefix from `// @id` inside `windhawk/liquid_glass_taskbar.wh.cpp`, `windhawk/liquid_glass_startmenu.wh.cpp`, and `windhawk/liquid_glass_tray.wh.cpp` while keeping `local@` storage filenames (`ModsSource/local@*.wh.cpp`, `Engine/Mods/local@*.ini`, and `local@*.dll`). Resolves Windhawk UI's `"Mod id must only contain the following characters: 0-9, a-z, and a hyphen (-)"` error toast and restores Name/Description/Author/Version display inside Windhawk's Installed Mods list.

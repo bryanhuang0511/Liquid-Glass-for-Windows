@@ -32,6 +32,13 @@ MOD_VERSION = "1.0.0"
 MOD_SOURCE_REL = ("windhawk", "liquid_glass_taskbar.wh.cpp")
 STATUS_FILENAME = "lgic_windhawk_status.json"
 DEFAULT_WINDHAWK_DIR = r"C:\Windhawk"
+_CUSTOM_WINDHAWK_DIR = ""
+PREBUILT_REL_DIR = ("windhawk", "prebuilt")
+RUNTIME_LIB_PAIRS = (
+    ("libc++.dll", "libc++.whl"),
+    ("libunwind.dll", "libunwind.whl"),
+    ("windhawk-mod-shim.dll", "windhawk-mod-shim.dll"),
+)
 
 MOD_SPECS = {
     "taskbar": {
@@ -85,6 +92,69 @@ def find_source_cpp(base_dir=None, scope="taskbar"):
         if os.path.exists(cand):
             return cand
     return None
+
+
+def _prebuilt_roots(base_dir=None, cpp_path=None):
+    roots = []
+    if base_dir:
+        roots.append(base_dir)
+    for env_k in ("LGFW_BASE_DIR", "LGIC_BASE_DIR"):
+        ev = os.environ.get(env_k)
+        if ev:
+            roots.append(ev)
+    if cpp_path:
+        roots.append(os.path.dirname(os.path.dirname(os.path.abspath(cpp_path))))
+    roots.append(_default_resource_root())
+    roots.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    seen, out = set(), []
+    for r in roots:
+        if not r:
+            continue
+        norm = os.path.normcase(os.path.normpath(r))
+        if norm not in seen:
+            seen.add(norm)
+            out.append(os.path.normpath(r))
+    return out
+
+
+def find_prebuilt_dll(base_dir=None, scope="taskbar", cpp_path=None):
+    """尋找隨包附帶的預編譯 64-bit 模組 DLL（供 Windhawk 2.0 無編譯器環境自動備援）。"""
+    spec = _spec(scope)
+    mod_id = spec["mod_id"]
+    prefix = f"{mod_id}_{spec['version']}_"
+    for root in _prebuilt_roots(base_dir=base_dir, cpp_path=cpp_path):
+        pdir = os.path.join(root, *PREBUILT_REL_DIR)
+        if not os.path.isdir(pdir):
+            continue
+        exact = os.path.join(pdir, f"{mod_id}.dll")
+        if os.path.exists(exact):
+            return exact
+        try:
+            for fn in sorted(os.listdir(pdir), reverse=True):
+                if fn.startswith(prefix) and fn.lower().endswith(".dll"):
+                    return os.path.join(pdir, fn)
+        except OSError:
+            continue
+    return None
+
+
+def normalize_windhawk_dir(raw_path):
+    cand = _clean_dir_candidate(raw_path)
+    if not cand:
+        return ""
+    if os.path.isfile(cand) and os.path.basename(cand).lower() == "windhawk.exe":
+        return os.path.normpath(os.path.dirname(cand))
+    return os.path.normpath(cand)
+
+
+def set_custom_windhawk_dir(raw_path):
+    global _CUSTOM_WINDHAWK_DIR
+    _CUSTOM_WINDHAWK_DIR = normalize_windhawk_dir(raw_path)
+    return _CUSTOM_WINDHAWK_DIR
+
+
+def get_custom_windhawk_dir():
+    return _CUSTOM_WINDHAWK_DIR
 
 
 def _is_access_denied(exc):
@@ -150,8 +220,49 @@ def _registry_windhawk_dirs():
     return found
 
 
+def _running_windhawk_dirs():
+    """若背景已有 windhawk.exe 正在執行，透過 Win32 QueryFullProcessImageNameW 反查其實際安裝目錄。"""
+    if os.name != "nt":
+        return []
+    found = []
+    try:
+        kernel32 = ctypes.windll.kernel32
+        snap = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+        invalid = ctypes.c_void_p(-1).value
+        if not snap or snap == invalid:
+            return []
+        try:
+            pe = _PROCESSENTRY32W()
+            pe.dwSize = ctypes.sizeof(_PROCESSENTRY32W)
+            if not kernel32.Process32FirstW(snap, ctypes.byref(pe)):
+                return []
+            while True:
+                if str(pe.szExeFile).lower() == "windhawk.exe":
+                    hproc = kernel32.OpenProcess(0x1000, False, pe.th32ProcessID)
+                    if hproc:
+                        try:
+                            buf = ctypes.create_unicode_buffer(1024)
+                            sz = wintypes.DWORD(1024)
+                            if kernel32.QueryFullProcessImageNameW(hproc, 0, buf, ctypes.byref(sz)):
+                                d = _clean_dir_candidate(buf.value)
+                                if d and d not in found:
+                                    found.append(d)
+                        finally:
+                            kernel32.CloseHandle(hproc)
+                if not kernel32.Process32NextW(snap, ctypes.byref(pe)):
+                    break
+        finally:
+            kernel32.CloseHandle(snap)
+    except Exception:
+        pass
+    return found
+
+
 def _candidate_windhawk_dirs():
-    cands = [DEFAULT_WINDHAWK_DIR]
+    cands = []
+    if _CUSTOM_WINDHAWK_DIR:
+        cands.append(_CUSTOM_WINDHAWK_DIR)
+    cands.append(DEFAULT_WINDHAWK_DIR)
     cands.extend(_registry_windhawk_dirs())
     for env_key, sub in (
         ("ProgramFiles", "Windhawk"),
@@ -159,10 +270,17 @@ def _candidate_windhawk_dirs():
         ("ProgramFiles(x86)", "Windhawk"),
         ("LOCALAPPDATA", os.path.join("Programs", "Windhawk")),
         ("LOCALAPPDATA", "Windhawk"),
+        ("USERPROFILE", os.path.join("scoop", "apps", "windhawk", "current")),
     ):
         base = os.environ.get(env_key)
         if base:
             cands.append(os.path.join(base, sub))
+    if DEFAULT_WINDHAWK_DIR == r"C:\Windhawk" and not (
+        os.environ.get("LGFW_WINDHAWK_DIR") or os.environ.get("LGIC_WINDHAWK_DIR")
+    ):
+        cands.extend(_running_windhawk_dirs())
+        for extra in (r"D:\Windhawk", r"E:\Windhawk", r"D:\Program Files\Windhawk"):
+            cands.append(extra)
     seen, out = set(), []
     for c in cands:
         if not c:
@@ -176,14 +294,16 @@ def _candidate_windhawk_dirs():
 
 def find_windhawk_dir(wh_dir=None):
     if wh_dir:
-        return wh_dir
+        return normalize_windhawk_dir(wh_dir)
     env_dir = os.environ.get("LGFW_WINDHAWK_DIR") or os.environ.get("LGIC_WINDHAWK_DIR")
     if env_dir:
         return env_dir
+    if _CUSTOM_WINDHAWK_DIR and os.path.exists(os.path.join(_CUSTOM_WINDHAWK_DIR, "windhawk.exe")):
+        return _CUSTOM_WINDHAWK_DIR
     for cand in _candidate_windhawk_dirs():
         if os.path.exists(os.path.join(cand, "windhawk.exe")):
             return cand
-    return DEFAULT_WINDHAWK_DIR
+    return _CUSTOM_WINDHAWK_DIR or DEFAULT_WINDHAWK_DIR
 
 
 def is_windhawk_installed(wh_dir=None):
@@ -482,13 +602,51 @@ def write_mod_config(paths, dll_filename, source_hash, params, enabled=True, sco
     )
 
 
+def _copy_file_atomic(src_path, dst_path):
+    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+    tmp_dst = dst_path + ".tmp"
+    shutil.copy2(src_path, tmp_dst)
+    os.replace(tmp_dst, dst_path)
+
+
+def _ensure_compiler_runtime_libs(paths, base_dir=None, cpp_path=None):
+    """確保 Engine\\Mods\\64 具備編譯後模組所需的執行期相依檔（libc++.whl / libunwind.whl / windhawk-mod-shim.dll）。"""
+    mods64 = paths.get("mods64_dir", "")
+    if not mods64 or not os.path.isdir(mods64):
+        return
+    comp_bin = os.path.join(
+        os.path.dirname(os.path.dirname(paths.get("compiler_clang", ""))),
+        "x86_64-w64-mingw32",
+        "bin",
+    )
+    roots = _prebuilt_roots(base_dir=base_dir, cpp_path=cpp_path)
+    for src_name, dst_name in RUNTIME_LIB_PAIRS:
+        dst_path = os.path.join(mods64, dst_name)
+        if os.path.exists(dst_path):
+            continue
+        candidates = [os.path.join(comp_bin, src_name)]
+        for r in roots:
+            pdir = os.path.join(r, *PREBUILT_REL_DIR)
+            candidates.append(os.path.join(pdir, dst_name))
+            candidates.append(os.path.join(pdir, src_name))
+        for cand in candidates:
+            if cand and os.path.exists(cand):
+                try:
+                    _copy_file_atomic(cand, dst_path)
+                except OSError:
+                    pass
+                break
+
+
 def compile_mod(paths, cpp_path, scope="taskbar"):
     spec = _spec(scope)
     clang = paths["compiler_clang"]
     wh_lib = paths["windhawk_lib"]
     inc_dir = paths["compiler_include"]
-    if not (os.path.exists(clang) and os.path.exists(wh_lib) and os.path.exists(inc_dir)):
-        return {"ok": False, "message": "找不到 Windhawk 編譯器（clang++.exe / windhawk.lib）"}
+    has_compiler = bool(os.path.exists(clang) and os.path.exists(wh_lib) and os.path.exists(inc_dir))
+    prebuilt_dll = find_prebuilt_dll(scope=scope, cpp_path=cpp_path)
+    if not has_compiler and not prebuilt_dll:
+        return {"ok": False, "message": "找不到 Windhawk 編譯器（clang++.exe / windhawk.lib）且無內建預編譯模組"}
 
     tag = _source_tag(cpp_path)
     dll_name = _target_dll_name(tag, scope=scope)
@@ -498,74 +656,104 @@ def compile_mod(paths, cpp_path, scope="taskbar"):
     except OSError as exc:
         if _is_access_denied(exc):
             return {"ok": False, "needs_admin": True,
-                    "message": "寫入標準安裝版 Windhawk 需要系統管理員權限，請點選最上方「以系統管理員身分重新啟動」後再試一次"}
+                    "message": "寫入標準安裝版 Windhawk 需要系統管理員權限，請點選「以系統管理員權限套用」或最上方提權按鈕"}
         return {"ok": False, "message": f"無法建立模組目錄：{exc}"}
 
-    if os.path.exists(paths["mods_source_dir"]):
+    mods_src_dir = paths.get("mods_source_dir", "")
+    if mods_src_dir:
         try:
-            shutil.copy2(cpp_path, os.path.join(paths["mods_source_dir"], f"{spec['mod_id']}.wh.cpp"))
+            if os.path.isdir(os.path.dirname(mods_src_dir)):
+                os.makedirs(mods_src_dir, exist_ok=True)
+            if os.path.isdir(mods_src_dir):
+                shutil.copy2(cpp_path, os.path.join(mods_src_dir, f"{spec['mod_id']}.wh.cpp"))
         except Exception:
             pass
 
     if os.path.exists(dll_path):
+        _ensure_compiler_runtime_libs(paths, cpp_path=cpp_path)
         return {"ok": True, "compiled": False, "dll_name": dll_name, "dll_path": dll_path, "source_hash": tag}
 
-    tmp_dll = dll_path + ".tmp.dll"
-    cmd = [
-        clang,
-        "-std=c++23",
-        "-O2",
-        "-shared",
-        "-DUNICODE",
-        "-D_UNICODE",
-        "-DWINVER=0x0A00",
-        "-D_WIN32_WINNT=0x0A00",
-        "-D_WIN32_IE=0x0A00",
-        "-DNTDDI_VERSION=0x0A000008",
-        "-D__USE_MINGW_ANSI_STDIO=0",
-        "-DWH_MOD",
-        f'-DWH_MOD_ID=L"{spec["mod_id"]}"',
-        f'-DWH_MOD_VERSION=L"{spec["version"]}"',
-        f"-I{inc_dir}",
-        "-include",
-        "windhawk_api.h",
-        "-target",
-        "x86_64-w64-mingw32",
-        "-Wl,--export-all-symbols",
-        cpp_path,
-        wh_lib,
-        "-lole32",
-        "-loleaut32",
-        "-lruntimeobject",
-        "-lshcore",
-        "-lwindowscodecs",
-        "-o",
-        tmp_dll,
-    ]
-    try:
-        res = subprocess.run(
-            cmd,
-            cwd=os.path.dirname(clang),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except Exception as exc:
-        return {"ok": False, "message": f"編譯模組時發生異常：{exc}"}
+    if has_compiler:
+        stage_tmp = os.path.join(tempfile.gettempdir(), f"lgfw_{os.getpid()}_{dll_name}.tmp.dll")
+        cmd = [
+            clang,
+            "-std=c++23",
+            "-O2",
+            "-shared",
+            "-DUNICODE",
+            "-D_UNICODE",
+            "-DWINVER=0x0A00",
+            "-D_WIN32_WINNT=0x0A00",
+            "-D_WIN32_IE=0x0A00",
+            "-DNTDDI_VERSION=0x0A000008",
+            "-D__USE_MINGW_ANSI_STDIO=0",
+            "-DWH_MOD",
+            f'-DWH_MOD_ID=L"{spec["mod_id"]}"',
+            f'-DWH_MOD_VERSION=L"{spec["version"]}"',
+            f"-I{inc_dir}",
+            "-include",
+            "windhawk_api.h",
+            "-target",
+            "x86_64-w64-mingw32",
+            "-Wl,--export-all-symbols",
+            cpp_path,
+            wh_lib,
+            "-lole32",
+            "-loleaut32",
+            "-lruntimeobject",
+            "-lshcore",
+            "-lwindowscodecs",
+            "-o",
+            stage_tmp,
+        ]
+        compile_err = ""
+        try:
+            res = subprocess.run(
+                cmd,
+                cwd=os.path.dirname(clang),
+                capture_output=True,
+                text=True,
+                timeout=120,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if res.returncode == 0 and os.path.exists(stage_tmp):
+                try:
+                    _copy_file_atomic(stage_tmp, dll_path)
+                except OSError as exc:
+                    if _is_access_denied(exc):
+                        return {"ok": False, "needs_admin": True,
+                                "message": "寫入標準安裝版 Windhawk 需要系統管理員權限，請點選「以系統管理員權限套用」或最上方提權按鈕"}
+                    return {"ok": False, "message": f"寫入模組 DLL 失敗：{exc}"}
+                _ensure_compiler_runtime_libs(paths, cpp_path=cpp_path)
+                return {"ok": True, "compiled": True, "dll_name": dll_name, "dll_path": dll_path, "source_hash": tag}
+            compile_err = (res.stderr or res.stdout or "").strip()[:300]
+        except Exception as exc:
+            compile_err = str(exc)
+        finally:
+            try:
+                if os.path.exists(stage_tmp):
+                    os.remove(stage_tmp)
+            except OSError:
+                pass
+        if not prebuilt_dll:
+            return {"ok": False, "message": f"Windhawk 模組編譯失敗：{compile_err}"}
 
-    if res.returncode != 0 or not os.path.exists(tmp_dll):
-        err = (res.stderr or res.stdout or "").strip()[:300]
-        return {"ok": False, "message": f"Windhawk 模組編譯失敗：{err}"}
-
     try:
-        os.replace(tmp_dll, dll_path)
+        _copy_file_atomic(prebuilt_dll, dll_path)
     except OSError as exc:
         if _is_access_denied(exc):
             return {"ok": False, "needs_admin": True,
-                    "message": "寫入標準安裝版 Windhawk 需要系統管理員權限，請點選最上方「以系統管理員身分重新啟動」後再試一次"}
-        return {"ok": False, "message": f"寫入模組 DLL 失敗：{exc}"}
-    return {"ok": True, "compiled": True, "dll_name": dll_name, "dll_path": dll_path, "source_hash": tag}
+                    "message": "寫入標準安裝版 Windhawk 需要系統管理員權限，請點選「以系統管理員權限套用」或最上方提權按鈕"}
+        return {"ok": False, "message": f"寫入預編譯模組 DLL 失敗：{exc}"}
+    _ensure_compiler_runtime_libs(paths, cpp_path=cpp_path)
+    return {
+        "ok": True,
+        "compiled": True,
+        "prebuilt": True,
+        "dll_name": dll_name,
+        "dll_path": dll_path,
+        "source_hash": tag,
+    }
 
 
 def read_telemetry_status(scope="taskbar"):
@@ -588,14 +776,22 @@ def get_status(wh_dir=None, base_dir=None, scope="taskbar"):
     disabled_flag = ini["mod"].get("Disabled", "1")
     mod_enabled = ini["exists"] and str(disabled_flag).strip() == "0"
     telem = read_telemetry_status(scope=scope)
+    compiler_avail = bool(
+        os.path.exists(paths["compiler_clang"])
+        and os.path.exists(paths["windhawk_lib"])
+        and os.path.exists(paths["compiler_include"])
+    )
+    prebuilt_avail = find_prebuilt_dll(base_dir, scope=scope) is not None
     return {
         "scope": scope,
         "windhawk_installed": os.path.exists(paths["exe"]),
         "windhawk_dir": paths["root"],
+        "custom_windhawk_dir": get_custom_windhawk_dir(),
         "storage_mode": paths["storage_mode"],
         "windhawk_running": is_windhawk_running(),
-        "compiler_available": os.path.exists(paths["compiler_clang"]),
-        "mod_source_available": find_source_cpp(base_dir, scope=scope) is not None,
+        "compiler_available": compiler_avail,
+        "prebuilt_available": prebuilt_avail,
+        "mod_source_available": find_source_cpp(base_dir, scope=scope) is not None or prebuilt_avail,
         "ini_exists": ini["exists"],
         "dll_filename": dll_name,
         "dll_exists": dll_exists,

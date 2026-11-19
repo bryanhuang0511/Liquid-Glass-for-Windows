@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 # Lines 15-35: 版本號與四區範圍狀態（全部四區正式開放，支援一鍵四區＋個別獨立）
-VERSION = "2.2.1"
+VERSION = "2.2.2"
 
 # 演算法或輸出格式變動時 +1，IconVault 的渲染快取會自動失效並重新生成。
 RENDER_VERSION = 7
@@ -317,7 +317,7 @@ def clamp_params(scope: str, params: Any) -> dict[str, float]:
     return out
 
 
-DEFAULT_TRAY_WHITELIST = "HWiNFO64.exe;HWiNFO32.exe;HWiNFO"
+DEFAULT_TRAY_WHITELIST = "HWiNFO64.exe;HWiNFO32.exe;HWiNFO;memreduct.exe;Mem Reduct"
 
 
 def normalize_tray_whitelist(raw: Any) -> str:
@@ -348,6 +348,7 @@ def default_config() -> dict[str, Any]:
     for scope in SCOPES:
         cfg[scope] = default_params(scope)
     cfg["tray_whitelist"] = DEFAULT_TRAY_WHITELIST
+    cfg["windhawk_dir"] = ""
     cfg["watcher"] = default_watcher()
     cfg["lifecycle"] = default_lifecycle()
     return cfg
@@ -369,6 +370,8 @@ def migrate_config(raw: Any) -> dict[str, Any]:
             cfg["desktop"] = default_params("desktop")
     if "tray_whitelist" in raw:
         cfg["tray_whitelist"] = normalize_tray_whitelist(raw["tray_whitelist"])
+    if isinstance(raw.get("windhawk_dir"), str):
+        cfg["windhawk_dir"] = raw["windhawk_dir"].strip()[:512]
     if "watcher" in raw:
         cfg["watcher"] = clamp_watcher(raw["watcher"])
     if "lifecycle" in raw:

@@ -321,6 +321,7 @@ class LiquidGlassApp:
         """載入設定檔並自動完成舊版格式升級。"""
         raw = self._read_raw_config() if os.path.exists(RT.CONFIG_PATH) else None
         self.config = S.migrate_config(raw)
+        WB.set_custom_windhawk_dir(self.config.get("windhawk_dir", ""))
         if isinstance(raw, dict) and raw.get("version") != S.VERSION:
             self.save_config(watcher_changed=True, lifecycle_changed=True)
 

@@ -201,3 +201,53 @@ def test_windhawk_source_metadata_matches_windhawk_validator():
         assert meta.get("version") == spec["version"]
         assert meta.get("include") == spec["include"]
         assert meta.get("architecture") in {"x86", "x86-64", "amd64", "arm64"}
+
+
+def test_windhawk_prebuilt_fallback_and_custom_dir(env, tmp_path, monkeypatch):
+    # Restore real compile_mod to test compiler-less Windhawk 2.0 fallback & permission handling.
+    import importlib
+    real_compile = importlib.reload(WB).compile_mod
+    monkeypatch.setattr(WB, "compile_mod", real_compile)
+    monkeypatch.setattr(WB, "is_windhawk_running", lambda: True)
+    monkeypatch.setattr(WB, "ensure_windhawk_running", lambda paths: True)
+
+    # Create a compiler-less Windhawk 2.0 directory (only windhawk.exe, no Compiler/clang++.exe)
+    wh2 = tmp_path / "CustomDriveWindhawk"
+    (wh2 / "AppData" / "Engine" / "Mods" / "64").mkdir(parents=True)
+    (wh2 / "windhawk.exe").write_bytes(b"WH20")
+
+    monkeypatch.delenv("LGFW_WINDHAWK_DIR", raising=False)
+    monkeypatch.delenv("LGIC_WINDHAWK_DIR", raising=False)
+    WB.set_custom_windhawk_dir(str(wh2 / "windhawk.exe"))
+    assert WB.get_custom_windhawk_dir() == os.path.normpath(str(wh2))
+    assert WB.find_windhawk_dir() == os.path.normpath(str(wh2))
+
+    # Stage fake prebuilt DLL + runtime shims under env.RT.BASE_DIR / windhawk / prebuilt
+    prebuilt_dir = tmp_path / "app" / "windhawk" / "prebuilt"
+    prebuilt_dir.mkdir(parents=True, exist_ok=True)
+    for sc, spec in WB.MOD_SPECS.items():
+        (prebuilt_dir / f"{spec['mod_id']}.dll").write_bytes(b"MZ_PREBUILT")
+    for _src, dst in WB.RUNTIME_LIB_PAIRS:
+        (prebuilt_dir / dst).write_bytes(b"MZ_RUNTIME")
+
+    st_before = WB.get_status(base_dir=str(tmp_path / "app"), scope="taskbar")
+    assert st_before["compiler_available"] is False
+    assert st_before["prebuilt_available"] is True
+
+    res = WB.apply_windhawk_mod("taskbar", S.default_params("taskbar"), base_dir=str(tmp_path / "app"))
+    assert res["ok"] is True and res["compiled"] is True
+    mods64 = wh2 / "AppData" / "Engine" / "Mods" / "64"
+    assert (mods64 / res["dll_filename"]).exists()
+    assert (mods64 / "libc++.whl").exists()
+    assert (mods64 / "libunwind.whl").exists()
+    assert (mods64 / "windhawk-mod-shim.dll").exists()
+
+    # Verify access-denied during atomic copy into an existing protected mods64 folder returns needs_admin=True
+    def deny_copy(_src, _dst):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(WB, "_copy_file_atomic", deny_copy)
+    (mods64 / res["dll_filename"]).unlink()
+    denied = WB.apply_windhawk_mod("taskbar", S.default_params("taskbar"), base_dir=str(tmp_path / "app"))
+    assert denied["ok"] is False and denied.get("needs_admin") is True
+    WB.set_custom_windhawk_dir("")

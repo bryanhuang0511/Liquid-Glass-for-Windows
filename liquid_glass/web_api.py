@@ -62,6 +62,7 @@ class LiquidGlassApi:
             "default_scope": S.ACTIVE_SCOPES[0] if wh_installed else "desktop",
             "windhawk_installed": wh_installed,
             "windhawk_dir": tb_st.get("windhawk_dir") or sm_st.get("windhawk_dir") or tr_st.get("windhawk_dir") or "",
+            "custom_windhawk_dir": str(self._app.config.get("windhawk_dir", "") or ""),
             "specs": S.SPECS,
             "config": {sc: self._app.config[sc] for sc in S.SCOPES},
             "autostart": RT.is_autostart_enabled(),
@@ -171,6 +172,91 @@ class LiquidGlassApi:
                 else f"已儲存通知列排除白名單（共 {len(items)} 條規則，啟用通知列模組時即生效）"
             ),
         }
+
+    def set_windhawk_dir(self, path_text: str = "") -> dict[str, Any]:
+        """手動指定或重設 Windhawk 安裝路徑（支援資料夾或 windhawk.exe 完整路徑），並寫入 config.json。"""
+        raw = str(path_text or "").strip()
+        if not raw:
+            self._app.config["windhawk_dir"] = ""
+            WB.set_custom_windhawk_dir("")
+            self._app.save_config()
+            tb_st, sm_st, tr_st = self._engine_statuses()
+            wh_ok = bool(tb_st.get("windhawk_installed"))
+            wh_dir = tb_st.get("windhawk_dir") or ""
+            return {
+                "ok": wh_ok,
+                "windhawk_installed": wh_ok,
+                "windhawk_dir": wh_dir,
+                "custom_windhawk_dir": "",
+                "taskbar_engine": tb_st,
+                "startmenu_engine": sm_st,
+                "tray_engine": tr_st,
+                "message": (
+                    f"已自動偵測到 Windhawk：{wh_dir}"
+                    if wh_ok
+                    else "已重設為自動偵測，但目前仍未在預設路徑或執行中行程找到 Windhawk"
+                ),
+            }
+
+        norm = WB.normalize_windhawk_dir(raw)
+        exe_path = os.path.join(norm, "windhawk.exe") if norm else ""
+        if not norm or not os.path.exists(exe_path):
+            tb_st, sm_st, tr_st = self._engine_statuses()
+            return {
+                "ok": False,
+                "windhawk_installed": bool(tb_st.get("windhawk_installed")),
+                "windhawk_dir": tb_st.get("windhawk_dir") or "",
+                "custom_windhawk_dir": str(self._app.config.get("windhawk_dir", "") or ""),
+                "taskbar_engine": tb_st,
+                "startmenu_engine": sm_st,
+                "tray_engine": tr_st,
+                "message": f"在此位置找不到 windhawk.exe：{norm or raw}",
+            }
+
+        self._app.config["windhawk_dir"] = norm
+        WB.set_custom_windhawk_dir(norm)
+        self._app.save_config()
+        tb_st, sm_st, tr_st = self._engine_statuses()
+        return {
+            "ok": True,
+            "windhawk_installed": True,
+            "windhawk_dir": norm,
+            "custom_windhawk_dir": norm,
+            "taskbar_engine": tb_st,
+            "startmenu_engine": sm_st,
+            "tray_engine": tr_st,
+            "message": f"已成功綁定 Windhawk 位置：{norm}（四區一鍵套用已解鎖）",
+        }
+
+    def browse_windhawk_dir(self) -> dict[str, Any]:
+        """開啟原生檔案選擇對話框供使用者選取 windhawk.exe。"""
+        win = getattr(self._app, "window", None)
+        if win is None:
+            return {"ok": False, "cancelled": True, "message": "設定視窗未開啟"}
+        try:
+            import webview
+
+            dlg_type = getattr(webview, "OPEN_DIALOG", 10)
+            picked = win.create_file_dialog(
+                dlg_type,
+                allow_multiple=False,
+                file_types=("Windhawk 主程式 (windhawk.exe)", "所有檔案 (*.*)"),
+            )
+            if not picked:
+                return {"ok": False, "cancelled": True, "message": "已取消選取"}
+            chosen = picked[0] if isinstance(picked, (list, tuple)) else str(picked)
+            return self.set_windhawk_dir(str(chosen))
+        except Exception as exc:
+            return {"ok": False, "message": f"開啟選取視窗失敗：{exc}"}
+
+    def open_windhawk_site(self) -> bool:
+        """以系統預設瀏覽器開啟 Windhawk 官方網站。"""
+        try:
+            import webbrowser
+
+            return bool(webbrowser.open("https://windhawk.net/"))
+        except Exception:
+            return False
 
     # Lines 137-205: 套用 / 還原與系統管理員提權控制
     def _batch_response(self, kind: str, res: list[dict[str, Any]] | None) -> dict[str, Any]:

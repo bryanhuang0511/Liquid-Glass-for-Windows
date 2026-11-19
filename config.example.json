@@ -1,5 +1,5 @@
 {
-  "version": "2.2.1",
+  "version": "2.2.2",
   "desktop": {
     "opacity": 1.0,
     "frost": 1.0,
@@ -24,7 +24,8 @@
     "glow": 1.0,
     "dark_protect": 1.0
   },
-  "tray_whitelist": "HWiNFO64.exe;HWiNFO32.exe;HWiNFO",
+  "tray_whitelist": "HWiNFO64.exe;HWiNFO32.exe;HWiNFO;memreduct.exe;Mem Reduct",
+  "windhawk_dir": "",
   "watcher": {
     "enabled": false,
     "debounce_sec": 3.0

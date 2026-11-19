@@ -15,7 +15,7 @@ New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
 # Pre-seed sandbox config with exit_when_window_closes=true so GUI check does not spawn a tray process
 $seedCfg = @'
 {
-  "version": "2.2.1",
+  "version": "2.2.2",
   "watcher": {"enabled": false, "debounce_sec": 3.0},
   "lifecycle": {"restore_live_on_exit": false, "exit_when_window_closes": true}
 }

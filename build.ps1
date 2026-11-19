@@ -2,7 +2,7 @@
 param(
     [switch]$OneFile,
     [switch]$PackageZip,
-    [string]$Version = "2.2.1",
+    [string]$Version = "2.2.2",
     [string]$Python = ""
 )
 
@@ -23,8 +23,31 @@ Write-Host "== [2/6] Verify Python environment ($Python) =="
 & $Python -c "import webview, PIL, numpy, pystray, liquid_glass.web_api; print('imports ok')"
 if ($LASTEXITCODE -ne 0) { throw "Python import check failed." }
 
-Write-Host "== [3/6] Clean previous build / dist folders =="
+Write-Host "== [3/6] Clean previous build / dist folders & stage prebuilt Windhawk DLLs =="
 Remove-Item -Recurse -Force .\build, .\dist -ErrorAction SilentlyContinue
+$stagePy = @'
+import os, shutil
+from liquid_glass import windhawk_bridge as WB
+pdir = os.path.join("windhawk", "prebuilt")
+os.makedirs(pdir, exist_ok=True)
+paths = WB.resolve_windhawk_paths(scope="taskbar")
+if os.path.exists(paths["compiler_clang"]) and os.path.exists(paths["windhawk_lib"]):
+    for sc, spec in WB.MOD_SPECS.items():
+        sc_paths = WB.resolve_windhawk_paths(scope=sc)
+        cpp = WB.find_source_cpp(scope=sc)
+        comp = WB.compile_mod(sc_paths, cpp, scope=sc)
+        if not comp.get("ok"):
+            raise SystemExit(f"Prebuilt compile failed for {sc}: {comp}")
+        shutil.copy2(comp["dll_path"], os.path.join(pdir, spec["mod_id"] + ".dll"))
+    comp_bin = os.path.join(os.path.dirname(os.path.dirname(paths["compiler_clang"])), "x86_64-w64-mingw32", "bin")
+    for src_name, dst_name in WB.RUNTIME_LIB_PAIRS:
+        src_p = os.path.join(comp_bin, src_name)
+        if os.path.exists(src_p):
+            shutil.copy2(src_p, os.path.join(pdir, dst_name))
+    print("Prebuilt Windhawk mods staged:", sorted(os.listdir(pdir)))
+'@
+& $Python -c $stagePy
+if ($LASTEXITCODE -ne 0) { throw "Failed to stage prebuilt Windhawk mods." }
 
 if ($OneFile) {
     Write-Host "== [4/6] PyInstaller --onefile build =="

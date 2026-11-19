@@ -32,7 +32,7 @@ without mutating on-disk shortcuts or colliding with layout/spacing mods.
   $name: Rim & Seam Glow (%)
 - DarkProtect: 100
   $name: Dark Logo Floor Protection (%)
-- WhitelistApps: HWiNFO64.exe;HWiNFO32.exe;HWiNFO
+- WhitelistApps: HWiNFO64.exe;HWiNFO32.exe;HWiNFO;memreduct.exe;Mem Reduct
   $name: Excluded Apps Whitelist (Keep Original Colors)
 */
 // ==/WindhawkModSettings==
@@ -98,7 +98,7 @@ struct OpticalSettings {
     int glowPct = 100;
     int darkProtectPct = 100;
     uint32_t generation = 1;
-    std::wstring whitelistRaw = L"HWiNFO64.exe;HWiNFO32.exe;HWiNFO";
+    std::wstring whitelistRaw = L"HWiNFO64.exe;HWiNFO32.exe;HWiNFO;memreduct.exe;Mem Reduct";
 };
 
 struct RawImage {
@@ -535,7 +535,7 @@ void LoadSettings() {
         next.whitelistRaw = rawWl;
         Wh_FreeStringSetting(rawWl);
     } else {
-        next.whitelistRaw = L"HWiNFO64.exe;HWiNFO32.exe;HWiNFO";
+        next.whitelistRaw = L"HWiNFO64.exe;HWiNFO32.exe;HWiNFO;memreduct.exe;Mem Reduct";
     }
 
     {

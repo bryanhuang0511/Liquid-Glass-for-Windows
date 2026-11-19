@@ -74,6 +74,8 @@ def _cli_admin(app: TC.LiquidGlassApp, argv: Sequence[str]) -> int:
         ok = RT.relaunch_as_admin([flag, target])
         print("已送出提權請求" if ok else "未取得管理員權限（UAC 被取消或無法提權）")
         return 0 if ok else 1
+    if target == "all":
+        scopes = SM.effective_active_scopes() or ["desktop"]
     sources = tuple(src for src, need in S.SOURCE_NEEDS_ADMIN.items() if need)
     res = SM.run_batch(kind, scopes, app.config, sources=sources)
     msg = SM.summarize(res, kind)

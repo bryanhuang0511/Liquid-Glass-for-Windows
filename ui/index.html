@@ -365,7 +365,7 @@
 
 <div>
 
-<h1>Liquid Glass for Windows<small id="ver">v2.2.1</small></h1>
+<h1>Liquid Glass for Windows<small id="ver">v2.2.2</small></h1>
 
 <div class="sub">桌面原生光學圖示立即可用｜工作列、開始功能表與通知列為 Windhawk 選用擴充</div>
 
@@ -427,17 +427,33 @@
 
 <div class="opt-banner" id="whOptionalBox" role="region" aria-label="Windhawk 選用擴充說明">
 
-<div class="opt-banner-head">🔌 未偵測到 Windhawk（本區為選用擴充功能）</div>
+<div class="opt-banner-head">🔌 未偵測到 Windhawk（本區為選用擴充功能・三步完成啟用）</div>
 
-<div>一般使用者可先直接使用完全獨立、免任何系統外掛的「桌面」區域。若想啟用工作列／開始功能表即時透明圖示，請安裝 Windhawk（自動支援 <code>C:\Windhawk</code> 與 <code>C:\Program Files\Windhawk</code>）後按重新偵測：</div>
+<div style="line-height:1.65">
+1️⃣ <b>安裝 Windhawk</b>：一般使用者可先直接套用免外掛的「桌面」區；若要啟用工作列／開始功能表／通知列即時霧透，請先安裝 Windhawk（標準安裝版、可攜版與 Windhawk 2.0 免編譯器環境皆支援）。<br>
+2️⃣ <b>自動偵測或指定位置</b>：支援自動掃描預設路徑與背景執行中行程；若安裝於自訂位置（如 <code>D:\Windhawk</code>），請點選「📂 瀏覽選取 windhawk.exe」或直接貼上路徑綁定。<br>
+3️⃣ <b>一鍵套用</b>：偵測解鎖後點選上方「✨ 一鍵套用全部四區」（標準安裝版會自動引導一鍵系統管理員授權）。
+</div>
 
 <div class="opt-banner-actions">
 
 <code class="opt-code" id="whUrlText">https://windhawk.net/</code>
 
-<button class="btn ghost" id="btnCopyWhUrl" type="button" style="padding:6px 11px;font-size:12px">📋 複製官網網址</button>
+<button class="btn primary" id="btnOpenWhSite" type="button" style="padding:6px 12px;font-size:12px">🌐 開啟官網下載</button>
 
-<button class="btn primary" id="btnRecheckWh" type="button" style="padding:6px 12px;font-size:12px">🔄 重新偵測 Windhawk</button>
+<button class="btn ghost" id="btnCopyWhUrl" type="button" style="padding:6px 11px;font-size:12px">📋 複製網址</button>
+
+<button class="btn primary" id="btnBrowseWh" type="button" style="padding:6px 12px;font-size:12px">📂 瀏覽選取 windhawk.exe</button>
+
+<button class="btn ghost" id="btnRecheckWh" type="button" style="padding:6px 12px;font-size:12px">🔄 重新自動偵測</button>
+
+</div>
+
+<div class="opt-banner-actions" style="margin-top:8px">
+
+<input type="text" id="txtWhPath" placeholder="或直接貼上 Windhawk 資料夾 / windhawk.exe 路徑（例如 D:\Windhawk）" spellcheck="false" style="flex:1;min-width:240px;padding:6px 10px;border-radius:8px;border:1px solid rgba(148,163,184,.28);background:rgba(15,23,42,.65);color:#e2e8f0;font-size:12px">
+
+<button class="btn ghost" id="btnSaveWhPath" type="button" style="padding:6px 12px;font-size:12px">💾 綁定路徑</button>
 
 </div>
 
@@ -463,19 +479,29 @@
 
 </div>
 
+<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid rgba(148,163,184,.14);font-size:12px;color:#94a3b8">
+<span id="engWhPathInfo">📍 Windhawk 路徑：自動偵測中…</span>
+<div style="display:flex;gap:8px;align-items:center">
+<button class="btn ghost" id="btnChangeWhDir" type="button" style="padding:4px 10px;font-size:11.5px">📂 變更 Windhawk 路徑</button>
+<button class="btn ghost" id="btnResetWhDir" type="button" style="padding:4px 10px;font-size:11.5px;display:none">↺ 改回自動偵測</button>
+</div>
+</div>
+
 </div>
 
 <div class="card" id="trayWhitelistCard" style="display:none">
 
-<div class="card-title"><span>🛡️ 通知列排除白名單（保留原色不轉換）</span><span class="note">以分號「;」分隔 .exe 檔名或應用程式名稱；預設已自動保護 HWiNFO64 全部動態感測器</span></div>
+<div class="card-title"><span>🛡️ 通知列排除白名單（保留原色不轉換）</span><span class="note">以分號「;」分隔 .exe 檔名或應用程式名稱；預設已自動保護 HWiNFO64 與 Mem Reduct 動態數字圖示</span></div>
 
-<textarea class="wl-box" id="txtTrayWhitelist" placeholder="例如：HWiNFO64.exe;HWiNFO32.exe;HWiNFO;AIDA64.exe" spellcheck="false"></textarea>
+<textarea class="wl-box" id="txtTrayWhitelist" placeholder="例如：HWiNFO64.exe;HWiNFO32.exe;HWiNFO;memreduct.exe;Mem Reduct;AIDA64.exe" spellcheck="false"></textarea>
 
 <div class="btns">
 
 <button class="btn primary" id="btnSaveTrayWhitelist" type="button">💾 儲存白名單並即時套用</button>
 
 <button class="btn ghost" id="btnWlAddHwinfo" type="button">+ HWiNFO64</button>
+
+<button class="btn ghost" id="btnWlAddMemReduct" type="button">+ Mem Reduct</button>
 
 <button class="btn ghost" id="btnWlAddAida" type="button">+ AIDA64</button>
 
@@ -898,16 +924,27 @@ function poll() {
 }
 
 let lastAdminKind = 'apply';
+let lastAdminTarget = 'all';
 
-function showAdminRetry(count, kind) {
+function showAdminRetry(count, kind, whNeedsAdmin = false, targetScope = '') {
   if (kind) lastAdminKind = kind;
+  if (targetScope) lastAdminTarget = targetScope;
   const box = $('adminRetry');
   if (!box) return;
   const n = Number(count) || 0;
-  box.style.display = n > 0 ? 'block' : 'none';
-  if (n > 0) {
+  const needWh = !!whNeedsAdmin;
+  box.style.display = (n > 0 || needWh) ? 'block' : 'none';
+  if (n > 0 || needWh) {
     const act = lastAdminKind === 'restore' ? '還原' : '套用';
-    if ($('btnAdminRetry')) $('btnAdminRetry').textContent = `🛡️ 以系統管理員權限重試 ${n} 個公用捷徑（${act}）`;
+    if ($('btnAdminRetry')) {
+      if (needWh && n > 0) {
+        $('btnAdminRetry').textContent = `🛡️ 一鍵授權管理員完成 Windhawk 與 ${n} 個公用捷徑（${act}）`;
+      } else if (needWh) {
+        $('btnAdminRetry').textContent = `🛡️ 標準安裝版 Windhawk 需要權限 ➔ 點此一鍵授權管理員完成${act}`;
+      } else {
+        $('btnAdminRetry').textContent = `🛡️ 以系統管理員權限重試 ${n} 個公用捷徑（${act}）`;
+      }
+    }
   }
 }
 
@@ -918,7 +955,8 @@ $('btnAdminRetry').addEventListener('click', () => {
   setBusy(true);
   toast('正在要求 Windows UAC 權限，請在系統視窗點「是」…', true, 4000);
   const fn = lastAdminKind === 'restore' ? 'restore_admin' : 'apply_admin';
-  a[fn](scope).then(r => {
+  const target = lastAdminTarget || scope;
+  a[fn](target).then(r => {
     if (!r || !r.ok) {
       setBusy(false);
       toast((r && r.message) || '未取得管理員權限', false, 6000);
@@ -934,13 +972,13 @@ $('btnAdminRetry').addEventListener('click', () => {
         if (ar && ar.time && Number(ar.time) >= startedAt) {
           clearInterval(waitAdmin);
           setBusy(false);
-          showAdminRetry(0);
-          toast(ar.message || '公用捷徑提權處理完成', true, 7000);
+          showAdminRetry(0, lastAdminKind, false);
+          toast(ar.message || '管理員提權處理完成', true, 7000);
           refreshStatus();
         } else if (tries >= 24) {
           clearInterval(waitAdmin);
           setBusy(false);
-          toast('提權請求已送出，請稍後確認桌面圖示或重試', true, 5000);
+          toast('提權請求已送出，請稍後確認圖示狀態或重試', true, 5000);
           refreshStatus();
         }
       }).catch(() => {});
@@ -951,7 +989,7 @@ $('btnAdminRetry').addEventListener('click', () => {
   });
 });
 
-function run(promiseFn, startMsg) {
+function run(promiseFn, startMsg, adminTarget = '') {
 
   const a = api(); if (!a || busy) return;
 
@@ -962,9 +1000,11 @@ function run(promiseFn, startMsg) {
     setBusy(false);
 
     toast(r.message || '完成', r.ok !== false && !/失敗|權限不足|需要系統管理員/.test(r.message || ''), 7000);
-    if (r && typeof r.needs_admin !== 'undefined') showAdminRetry(r.needs_admin, r.kind);
-    if (r && r.windhawk_needs_admin && !r.ok && $('elevateBanner')) {
-      $('elevateBanner').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (r && (typeof r.needs_admin !== 'undefined' || r.windhawk_needs_admin)) {
+      showAdminRetry(r.needs_admin, r.kind, !!r.windhawk_needs_admin, adminTarget || scope);
+    }
+    if (r && r.windhawk_needs_admin && !r.ok && $('adminRetry')) {
+      $('adminRetry').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     refreshStatus();
@@ -981,7 +1021,7 @@ $('btnApplyScope').addEventListener('click', () => {
 
   if (ST && ST.specs[scope] && ST.specs[scope].locked) return;
 
-  run(a => a.apply_scope(scope, cfg[scope]), `正在套用「${ST.specs[scope].label}」…`);
+  run(a => a.apply_scope(scope, cfg[scope]), `正在套用「${ST.specs[scope].label}」…`, scope);
 
 });
 
@@ -989,7 +1029,7 @@ $('btnRestoreScope').addEventListener('click', () => {
 
   if (ST && ST.specs[scope] && ST.specs[scope].locked) return;
 
-  run(a => a.restore_scope(scope), `正在還原「${ST.specs[scope].label}」…`);
+  run(a => a.restore_scope(scope), `正在還原「${ST.specs[scope].label}」…`, scope);
 
 });
 
@@ -997,7 +1037,7 @@ $('btnApplyAll').addEventListener('click', () => {
 
   const msg = isWhAvailable() ? '正在套用全部四區 Liquid Glass…' : '正在套用桌面 Liquid Glass…';
 
-  run(a => a.apply_all(cfg), msg);
+  run(a => a.apply_all(cfg), msg, 'all');
 
 });
 
@@ -1005,9 +1045,50 @@ $('btnRestoreAll').addEventListener('click', () => {
 
   const msg = isWhAvailable() ? '正在還原全部已啟用區域原生圖示…' : '正在還原桌面原生圖示…';
 
-  run(a => a.restore_all(), msg);
+  run(a => a.restore_all(), msg, 'all');
 
 });
+
+if ($('btnOpenWhSite')) {
+  $('btnOpenWhSite').addEventListener('click', () => {
+    const a = api();
+    if (a && a.open_windhawk_site) {
+      a.open_windhawk_site().then(() => toast('已開啟 Windhawk 官方網站'));
+    } else if ($('btnCopyWhUrl')) {
+      $('btnCopyWhUrl').click();
+    }
+  });
+}
+
+function applyCustomWhPath(rawPath) {
+  const a = api(); if (!a || !a.set_windhawk_dir) return;
+  setBusy(true);
+  a.set_windhawk_dir(rawPath || '').then(r => {
+    setBusy(false);
+    if ($('txtWhPath') && r && typeof r.custom_windhawk_dir === 'string') {
+      $('txtWhPath').value = r.custom_windhawk_dir;
+    }
+    toast((r && r.message) || '已更新 Windhawk 路徑設定', !!(r && r.ok), 5500);
+    refreshStatus();
+  }).catch(e => { setBusy(false); toast('設定 Windhawk 路徑失敗：' + e, false, 5500); });
+}
+
+function triggerBrowseWh() {
+  const a = api(); if (!a || !a.browse_windhawk_dir) return;
+  a.browse_windhawk_dir().then(r => {
+    if (r && r.cancelled) return;
+    if ($('txtWhPath') && r && typeof r.custom_windhawk_dir === 'string') {
+      $('txtWhPath').value = r.custom_windhawk_dir;
+    }
+    toast((r && r.message) || '已更新 Windhawk 位置', !!(r && r.ok), 5500);
+    refreshStatus();
+  }).catch(e => toast('選取 Windhawk 失敗：' + e, false, 5500));
+}
+
+if ($('btnBrowseWh')) $('btnBrowseWh').addEventListener('click', triggerBrowseWh);
+if ($('btnChangeWhDir')) $('btnChangeWhDir').addEventListener('click', triggerBrowseWh);
+if ($('btnSaveWhPath')) $('btnSaveWhPath').addEventListener('click', () => applyCustomWhPath($('txtWhPath') ? $('txtWhPath').value : ''));
+if ($('btnResetWhDir')) $('btnResetWhDir').addEventListener('click', () => applyCustomWhPath(''));
 
 if ($('btnCopyWhUrl')) {
 
@@ -1117,7 +1198,9 @@ function renderEngineTelemetry(st, sc = scope) {
 
   if (!st.windhawk_installed) {
 
-    $('engWh').textContent = '未偵測（請先安裝 Windhawk）';
+    $('engWh').textContent = '未偵測（請先安裝或指定 Windhawk 位置）';
+    if ($('engWhPathInfo')) $('engWhPathInfo').textContent = '📍 Windhawk 路徑：尚未偵測到（可點右側按鈕手動選取 windhawk.exe）';
+    if ($('btnResetWhDir')) $('btnResetWhDir').style.display = (st.custom_windhawk_dir ? 'inline-block' : 'none');
 
     if (badge) {
 
@@ -1131,9 +1214,18 @@ function renderEngineTelemetry(st, sc = scope) {
 
     const wh = st.windhawk_running ? '執行中' : '未啟動';
 
-    const modeTag = st.storage_mode === 'registry' ? '・系統安裝版' : '';
+    const modeTag = st.storage_mode === 'registry' ? '・系統安裝版' : '・可攜版';
+    const readyTag = st.dll_exists
+      ? '（模組已就緒）'
+      : (st.compiler_available ? '（本機編譯器就緒）' : (st.prebuilt_available ? '（內建預編譯模組就緒）' : '（待編譯）'));
 
-    $('engWh').textContent = wh + modeTag + (st.dll_exists ? '（模組已就緒）' : '（待編譯）');
+    $('engWh').textContent = wh + modeTag + readyTag;
+    if ($('engWhPathInfo')) {
+      const customTag = st.custom_windhawk_dir ? '（手動指定）' : '（自動偵測）';
+      const admNote = (st.storage_mode === 'registry' && !(ST && ST.is_admin)) ? '｜🛡️ 標準安裝版套用時需管理員授權' : '';
+      $('engWhPathInfo').textContent = `📍 Windhawk 路徑：${st.windhawk_dir || '—'} ${customTag}${admNote}`;
+    }
+    if ($('btnResetWhDir')) $('btnResetWhDir').style.display = (st.custom_windhawk_dir ? 'inline-block' : 'none');
 
     if (badge) {
 
@@ -1371,7 +1463,8 @@ function initUI() {
 
     if ($('swRestoreOnExit')) $('swRestoreOnExit').checked = !!s.restore_on_exit;
 
-    if ($('txtTrayWhitelist')) $('txtTrayWhitelist').value = (s.tray_whitelist !== undefined ? s.tray_whitelist : 'HWiNFO64.exe;HWiNFO32.exe;HWiNFO');
+    if ($('txtTrayWhitelist')) $('txtTrayWhitelist').value = (s.tray_whitelist !== undefined ? s.tray_whitelist : 'HWiNFO64.exe;HWiNFO32.exe;HWiNFO;memreduct.exe;Mem Reduct');
+    if ($('txtWhPath') && s.custom_windhawk_dir) $('txtWhPath').value = s.custom_windhawk_dir;
 
     if ($('watcherRow')) {
 
@@ -1437,8 +1530,9 @@ if ($('btnSaveTrayWhitelist')) {
   };
   $('btnSaveTrayWhitelist').addEventListener('click', () => pushWhitelist($('txtTrayWhitelist') ? $('txtTrayWhitelist').value : ''));
   if ($('btnWlAddHwinfo')) $('btnWlAddHwinfo').addEventListener('click', () => { appendToken('HWiNFO64.exe'); appendToken('HWiNFO32.exe'); appendToken('HWiNFO'); });
+  if ($('btnWlAddMemReduct')) $('btnWlAddMemReduct').addEventListener('click', () => { appendToken('memreduct.exe'); appendToken('Mem Reduct'); });
   if ($('btnWlAddAida')) $('btnWlAddAida').addEventListener('click', () => appendToken('aida64.exe'));
-  if ($('btnWlReset')) $('btnWlReset').addEventListener('click', () => pushWhitelist('HWiNFO64.exe;HWiNFO32.exe;HWiNFO'));
+  if ($('btnWlReset')) $('btnWlReset').addEventListener('click', () => pushWhitelist('HWiNFO64.exe;HWiNFO32.exe;HWiNFO;memreduct.exe;Mem Reduct'));
 }
 
 // 保險：若 pywebviewready 已在腳本註冊前觸發
