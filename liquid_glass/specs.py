@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 # Lines 15-35: 版本號與四區範圍狀態（全部四區正式開放，支援一鍵四區＋個別獨立）
-VERSION = "2.2.2"
+VERSION = "3.0.0"
 
 # 演算法或輸出格式變動時 +1，IconVault 的渲染快取會自動失效並重新生成。
 RENDER_VERSION = 7

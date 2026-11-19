@@ -1257,7 +1257,7 @@ bool IsApprovedStartMenuIconImage(const wuxc::Image& img) {
 
         double aw = img.ActualWidth();
         double ah = img.ActualHeight();
-        if (aw > 0.0 && ah > 0.0 && (aw < 10.0 || ah < 10.0 || aw > 128.0 || ah > 128.0)) {
+        if (aw > 0.0 && ah > 0.0 && (aw < 8.0 || ah < 8.0 || aw > 128.0 || ah > 128.0)) {
             return false;
         }
 

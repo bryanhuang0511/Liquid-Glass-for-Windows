@@ -90,6 +90,29 @@ def _cli_admin(app: TC.LiquidGlassApp, argv: Sequence[str]) -> int:
     return 0
 
 
+def _setup_windhawk_cli(app: TC.LiquidGlassApp) -> int:
+    """提權或無介面一次自動配置 Windhawk 全區即時模組並回寫 admin_last_result.json。"""
+    from liquid_glass import windhawk_bridge as WB
+
+    paths = WB.resolve_windhawk_paths()
+    if paths.get("storage_mode") == "registry" and not RT.is_admin():
+        ok = RT.relaunch_as_admin(["--setup-windhawk"])
+        print("已送出提權請求" if ok else "未取得管理員權限（UAC 被取消或無法提權）")
+        return 0 if ok else 1
+    scopes = SM.effective_active_scopes() or ["desktop"]
+    res = SM.run_batch("apply", scopes, app.config)
+    msg = SM.summarize(res, "apply")
+    print(msg)
+    try:
+        RT.atomic_write_json(
+            RT.ADMIN_RESULT_PATH,
+            {"kind": "setup_windhawk", "scopes": scopes, "message": msg, "results": res, "time": time.time()},
+        )
+    except Exception:
+        pass
+    return 0
+
+
 def _parse_startup_scope(argv: Sequence[str] | None) -> str:
     """解析啟動參數中的 --scope / --scope= 以決定 UI 預設停駐分頁。"""
     for i, arg in enumerate(argv or ()):
@@ -137,6 +160,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_self_check()
     RT.ensure_dirs()
     app = TC.LiquidGlassApp()
+    if "--setup-windhawk" in args:
+        return _setup_windhawk_cli(app)
     if "--apply-admin" in args or "--restore-admin" in args:
         return _cli_admin(app, args)
     if "--apply" in args or "--restore" in args:

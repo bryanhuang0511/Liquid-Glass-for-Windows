@@ -2,7 +2,7 @@
 param(
     [switch]$OneFile,
     [switch]$PackageZip,
-    [string]$Version = "2.2.2",
+    [string]$Version = "3.0.0",
     [string]$Python = ""
 )
 
