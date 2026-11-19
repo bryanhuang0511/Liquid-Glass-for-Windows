@@ -251,3 +251,66 @@ def test_windhawk_prebuilt_fallback_and_custom_dir(env, tmp_path, monkeypatch):
     denied = WB.apply_windhawk_mod("taskbar", S.default_params("taskbar"), base_dir=str(tmp_path / "app"))
     assert denied["ok"] is False and denied.get("needs_admin") is True
     WB.set_custom_windhawk_dir("")
+
+
+def test_utf16_windhawk_ini_misplaced_cleanup_and_tasks_dialog(env, tmp_path, monkeypatch):
+    std_wh = tmp_path / "StdWhUtf16"
+    pdata = tmp_path / "StdPdataUtf16"
+    (std_wh / "Compiler" / "bin").mkdir(parents=True)
+    (std_wh / "Compiler" / "include").mkdir(parents=True)
+    (std_wh / "Engine" / "1.7.3" / "64").mkdir(parents=True)
+    (std_wh / "windhawk.exe").write_bytes(b"WH")
+    (std_wh / "Compiler" / "bin" / "clang++.exe").write_bytes(b"CC")
+    (std_wh / "Engine" / "1.7.3" / "64" / "windhawk.lib").write_bytes(b"LIB")
+
+    # Official Windhawk installer writes windhawk.ini in UTF-16 LE with BOM.
+    ini_text = (
+        "[Storage]\r\nPortable=0\r\nCompilerPath=Compiler\r\n"
+        "EnginePath=Engine\\1.7.3\r\nAppDataPath=%ProgramData%\\Windhawk\r\n"
+        "RegistryKey=HKLM\\SOFTWARE\\Windhawk\r\n"
+    )
+    (std_wh / "windhawk.ini").write_bytes(ini_text.encode("utf-16"))
+    monkeypatch.setenv("ProgramData", str(pdata))
+    monkeypatch.setenv("LGFW_WINDHAWK_DIR", str(std_wh))
+    monkeypatch.setenv("LGIC_WINDHAWK_DIR", str(std_wh))
+
+    paths = WB.resolve_windhawk_paths(scope="taskbar")
+    assert paths["storage_mode"] == "registry"
+    assert paths["registry_key"] == r"HKLM\SOFTWARE\Windhawk"
+    assert os.path.normpath(paths["mods_dir"]) == os.path.normpath(str(pdata / "Windhawk" / "Engine" / "Mods"))
+
+    # Verify misplaced local@liquid-glass-* files in <WindhawkRoot>\AppData\Engine\Mods are cleaned up
+    # while unrelated files stay untouched.
+    mis_mods = std_wh / "AppData" / "Engine" / "Mods"
+    mis_64 = mis_mods / "64"
+    mis_64.mkdir(parents=True)
+    mis_ini = mis_mods / "local@liquid-glass-taskbar-icons.ini"
+    mis_dll = mis_64 / "local@liquid-glass-taskbar-icons_1.0.0_111111.dll"
+    unrelated = mis_mods / "other-mod.ini"
+    mis_ini.write_text("bad", encoding="utf-8")
+    mis_dll.write_bytes(b"BAD")
+    unrelated.write_text("keep", encoding="utf-8")
+    assert WB._cleanup_misplaced_standard_files(paths) == 2
+    assert not mis_ini.exists() and not mis_dll.exists() and unrelated.exists()
+
+    # Verify Portable settings.ini ModTasksDialogDelay toggle + initializing_symbols detection
+    port_wh = tmp_path / "PortWh"
+    (port_wh / "AppData" / "Engine" / "Mods" / "64").mkdir(parents=True)
+    (port_wh / "windhawk.exe").write_bytes(b"WH")
+    (port_wh / "windhawk.ini").write_text("[Storage]\nPortable=1\nAppDataPath=AppData\n", encoding="utf-8")
+    monkeypatch.setenv("LGFW_WINDHAWK_DIR", str(port_wh))
+    monkeypatch.setenv("LGIC_WINDHAWK_DIR", str(port_wh))
+
+    assert WB.get_tasks_dialog_hidden()["hidden"] is False
+    set_on = WB.set_tasks_dialog_hidden(True)
+    assert set_on["ok"] is True and set_on["hidden"] is True and set_on["delay_ms"] == 3600000
+    assert WB.get_tasks_dialog_hidden()["hidden"] is True
+    set_off = WB.set_tasks_dialog_hidden(False)
+    assert set_off["ok"] is True and set_off["hidden"] is False and set_off["delay_ms"] == 2000
+
+    p_paths = WB.resolve_windhawk_paths(scope="taskbar")
+    (port_wh / "AppData" / "Engine" / "Mods" / "64" / "local@liquid-glass-taskbar-icons_1.0.0_123456.dll").write_bytes(b"MZ")
+    WB.write_mod_config(p_paths, "local@liquid-glass-taskbar-icons_1.0.0_123456.dll", "abcd", S.default_params("taskbar"), enabled=True)
+    monkeypatch.setattr(WB, "is_windhawk_running", lambda: True)
+    st_sym = WB.get_status(scope="taskbar")
+    assert st_sym["initializing_symbols"] is True

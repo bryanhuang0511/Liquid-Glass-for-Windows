@@ -310,6 +310,34 @@ def is_windhawk_installed(wh_dir=None):
     return os.path.exists(resolve_windhawk_paths(wh_dir)["exe"])
 
 
+def _read_ini_text_with_bom(ini_path):
+    """讀取 INI 文字並自動偵測 UTF-16 LE/BE BOM（標準安裝版 windhawk.ini 預設格式）與 UTF-8 BOM。"""
+    with open(ini_path, "rb") as handle:
+        raw = handle.read()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig")
+    if b"\x00" in raw[:64]:
+        try:
+            return raw.decode("utf-16-le")
+        except UnicodeDecodeError:
+            pass
+    for enc in ("utf-8", "cp1252"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def _read_ini_configparser(ini_path):
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    cp.read_string(_read_ini_text_with_bom(ini_path))
+    return cp
+
+
 def _resolve_storage_path(root, raw_val, fallback_rel):
     val = str(raw_val or "").strip().strip('"')
     expanded = os.path.expandvars(val) if val else ""
@@ -331,10 +359,8 @@ def resolve_windhawk_paths(wh_dir=None, scope="taskbar"):
 
     wh_ini = os.path.join(root, "windhawk.ini")
     if os.path.exists(wh_ini):
-        cp = configparser.ConfigParser(interpolation=None)
-        cp.optionxform = str
         try:
-            cp.read(wh_ini, encoding="utf-8-sig")
+            cp = _read_ini_configparser(wh_ini)
             if cp.has_section("Storage"):
                 st = cp["Storage"]
                 portable_flag = str(st.get("Portable", "1")).strip()
@@ -366,6 +392,8 @@ def resolve_windhawk_paths(wh_dir=None, scope="taskbar"):
         "compiler_clang": os.path.join(compiler_path, "bin", "clang++.exe"),
         "compiler_include": os.path.join(compiler_path, "include"),
         "windhawk_lib": os.path.join(engine_path, "64", "windhawk.lib"),
+        "app_data_dir": app_data_path,
+        "app_settings_ini": os.path.join(app_data_path, "settings.ini"),
         "mods_dir": mods_dir,
         "mods64_dir": os.path.join(mods_dir, "64"),
         "mods_source_dir": os.path.join(app_data_path, "ModsSource"),
@@ -459,10 +487,8 @@ def ensure_windhawk_running(paths):
 def read_mod_ini(ini_path):
     if not os.path.exists(ini_path):
         return {"exists": False, "mod": {}, "settings": {}}
-    cp = configparser.ConfigParser(interpolation=None)
-    cp.optionxform = str
     try:
-        cp.read(ini_path, encoding="utf-8-sig")
+        cp = _read_ini_configparser(ini_path)
     except Exception:
         return {"exists": True, "mod": {}, "settings": {}}
     return {
@@ -500,6 +526,22 @@ def _mod_payload(spec, dll_filename, source_hash, params, enabled=True, scope="t
     return mod_fields, setting_fields
 
 
+def _replace_with_retry(tmp_path, dst_path):
+    """在 Windhawk 短暫讀取 .ini / .dll 鎖定時進行毫秒級重試再原子替換。"""
+    delays = (0.05, 0.12, 0.25)
+    for idx, delay in enumerate(delays):
+        try:
+            os.replace(tmp_path, dst_path)
+            return
+        except OSError as exc:
+            winerr = getattr(exc, "winerror", None)
+            if idx < len(delays) - 1 and (isinstance(exc, PermissionError) or winerr in (5, 32, 33)):
+                time.sleep(delay)
+                continue
+            raise
+    os.replace(tmp_path, dst_path)
+
+
 def write_mod_ini(ini_path, dll_filename, source_hash, params, enabled=True, scope="taskbar", whitelist=None):
     spec = _spec(scope)
     mod_fields, setting_fields = _mod_payload(
@@ -515,7 +557,7 @@ def write_mod_ini(ini_path, dll_filename, source_hash, params, enabled=True, sco
     tmp = ini_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    os.replace(tmp, ini_path)
+    _replace_with_retry(tmp, ini_path)
 
 
 def _parse_registry_root(reg_key):
@@ -606,7 +648,7 @@ def _copy_file_atomic(src_path, dst_path):
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
     tmp_dst = dst_path + ".tmp"
     shutil.copy2(src_path, tmp_dst)
-    os.replace(tmp_dst, dst_path)
+    _replace_with_retry(tmp_dst, dst_path)
 
 
 def _ensure_compiler_runtime_libs(paths, base_dir=None, cpp_path=None):
@@ -776,6 +818,7 @@ def get_status(wh_dir=None, base_dir=None, scope="taskbar"):
     disabled_flag = ini["mod"].get("Disabled", "1")
     mod_enabled = ini["exists"] and str(disabled_flag).strip() == "0"
     telem = read_telemetry_status(scope=scope)
+    running = is_windhawk_running()
     compiler_avail = bool(
         os.path.exists(paths["compiler_clang"])
         and os.path.exists(paths["windhawk_lib"])
@@ -788,7 +831,7 @@ def get_status(wh_dir=None, base_dir=None, scope="taskbar"):
         "windhawk_dir": paths["root"],
         "custom_windhawk_dir": get_custom_windhawk_dir(),
         "storage_mode": paths["storage_mode"],
-        "windhawk_running": is_windhawk_running(),
+        "windhawk_running": running,
         "compiler_available": compiler_avail,
         "prebuilt_available": prebuilt_avail,
         "mod_source_available": find_source_cpp(base_dir, scope=scope) is not None or prebuilt_avail,
@@ -796,9 +839,111 @@ def get_status(wh_dir=None, base_dir=None, scope="taskbar"):
         "dll_filename": dll_name,
         "dll_exists": dll_exists,
         "enabled": bool(mod_enabled and (telem.get("active", True) if telem else True)),
+        "initializing_symbols": bool(mod_enabled and dll_exists and running and telem is None),
         "telemetry": telem,
         "ini_settings": ini["settings"],
     }
+
+
+def get_tasks_dialog_hidden(wh_dir=None):
+    """查詢 Windhawk「模組初始化對話框延遲」是否已設為靜音延後（>= 60000 ms）。"""
+    paths = resolve_windhawk_paths(wh_dir)
+    if not os.path.exists(paths["exe"]):
+        return {"ok": False, "windhawk_missing": True, "hidden": False, "delay_ms": 2000}
+    delay = 2000
+    if paths.get("storage_mode") == "registry":
+        hive, base_sub = _parse_registry_root(paths.get("registry_key"))
+        if hive is not None:
+            try:
+                vals = _read_reg_values(hive, f"{base_sub}\\Settings")
+                delay = int(vals.get("ModTasksDialogDelay", 2000))
+            except (OSError, ValueError):
+                pass
+    else:
+        ini_p = paths.get("app_settings_ini", "")
+        if ini_p and os.path.exists(ini_p):
+            try:
+                cp = _read_ini_configparser(ini_p)
+                if cp.has_section("Settings") and "ModTasksDialogDelay" in cp["Settings"]:
+                    delay = int(str(cp["Settings"]["ModTasksDialogDelay"]).strip())
+            except Exception:
+                pass
+    return {"ok": True, "hidden": delay >= 60000, "delay_ms": delay}
+
+
+def set_tasks_dialog_hidden(hidden, wh_dir=None):
+    """切換 Windhawk ModTasksDialogDelay（3600000 ms 隱藏右下角任務白框，或回復 2000 ms）。"""
+    paths = resolve_windhawk_paths(wh_dir)
+    if not os.path.exists(paths["exe"]):
+        return {"ok": False, "windhawk_missing": True, "hidden": False, "message": "未偵測到 Windhawk"}
+    delay = 3600000 if hidden else 2000
+    if paths.get("storage_mode") == "registry":
+        hive, base_sub = _parse_registry_root(paths.get("registry_key"))
+        if hive is None:
+            return {"ok": False, "hidden": False, "message": "無效的 Windhawk RegistryKey"}
+        try:
+            with winreg.CreateKeyEx(hive, f"{base_sub}\\Settings", 0, winreg.KEY_WRITE | winreg.KEY_READ) as sk:
+                winreg.SetValueEx(sk, "ModTasksDialogDelay", 0, winreg.REG_DWORD, delay)
+        except OSError as exc:
+            if _is_access_denied(exc):
+                return {"ok": False, "needs_admin": True, "hidden": not bool(hidden),
+                        "message": "變更標準安裝版 Windhawk 設定需要系統管理員權限"}
+            return {"ok": False, "hidden": not bool(hidden), "message": f"寫入 Windhawk 設定失敗：{exc}"}
+    else:
+        ini_p = paths.get("app_settings_ini", "")
+        cp = configparser.ConfigParser(interpolation=None)
+        cp.optionxform = str
+        if ini_p and os.path.exists(ini_p):
+            try:
+                cp = _read_ini_configparser(ini_p)
+            except Exception:
+                pass
+        if not cp.has_section("Settings"):
+            cp.add_section("Settings")
+        cp["Settings"]["ModTasksDialogDelay"] = str(delay)
+        try:
+            os.makedirs(os.path.dirname(ini_p), exist_ok=True)
+            lines = []
+            for sec in cp.sections():
+                lines.append(f"[{sec}]")
+                lines.extend(f"{k}={v}" for k, v in cp[sec].items())
+                lines.append("")
+            tmp = ini_p + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines))
+            _replace_with_retry(tmp, ini_p)
+        except OSError as exc:
+            return {"ok": False, "hidden": not bool(hidden), "message": f"寫入 settings.ini 失敗：{exc}"}
+    return {
+        "ok": True,
+        "hidden": bool(hidden),
+        "delay_ms": delay,
+        "message": "已將 Windhawk 右下角任務進度框延後隱藏（重啟 Windhawk 後生效）" if hidden else "已還原 Windhawk 預設任務進度框提示",
+    }
+
+
+def _cleanup_misplaced_standard_files(paths):
+    """標準安裝版（Portable=0）清理舊版誤寫於 <WindhawkRoot>\\AppData\\Engine\\Mods 的專屬殘留檔。"""
+    if paths.get("storage_mode") != "registry":
+        return 0
+    misplaced_mods = os.path.join(paths.get("root", ""), "AppData", "Engine", "Mods")
+    if not misplaced_mods or os.path.normcase(misplaced_mods) == os.path.normcase(paths.get("mods_dir", "")):
+        return 0
+    removed = 0
+    for folder in (os.path.join(misplaced_mods, "64"), misplaced_mods):
+        if not os.path.isdir(folder):
+            continue
+        try:
+            for fn in os.listdir(folder):
+                if fn.startswith("local@liquid-glass-") and fn.lower().endswith((".ini", ".dll")):
+                    try:
+                        os.remove(os.path.join(folder, fn))
+                        removed += 1
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    return removed
 
 
 def _cleanup_stale_mod_dlls(paths, scope, keep_dll):
@@ -824,6 +969,7 @@ def apply_windhawk_mod(scope, params, wh_dir=None, base_dir=None, whitelist=None
     paths = resolve_windhawk_paths(wh_dir, scope=scope)
     if not os.path.exists(paths["exe"]):
         return {"ok": False, "windhawk_missing": True, "message": f"未偵測到 Windhawk（{paths['exe']}）；{spec['label']}屬於選用擴充功能"}
+    _cleanup_misplaced_standard_files(paths)
     cpp = find_source_cpp(base_dir, scope=scope)
     if not cpp:
         return {"ok": False, "message": f"找不到{spec['label']} Windhawk C++ 模組原始碼"}

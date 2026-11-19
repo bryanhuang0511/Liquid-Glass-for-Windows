@@ -77,6 +77,7 @@ class LiquidGlassApi:
             "is_admin": RT.is_admin(),
             "tray_running": TC.is_tray_running(),
             "tray_whitelist": S.normalize_tray_whitelist(self._app.config.get("tray_whitelist")),
+            "hide_wh_tasks_dialog": WB.get_tasks_dialog_hidden().get("hidden", False),
             "taskbar_engine": tb_st,
             "startmenu_engine": sm_st,
             "tray_engine": tr_st,
@@ -257,6 +258,46 @@ class LiquidGlassApi:
             return bool(webbrowser.open("https://windhawk.net/"))
         except Exception:
             return False
+
+    def auto_setup_windhawk(self) -> dict[str, Any]:
+        """自動偵測本機 Windhawk 並一次完成三區即時模組編譯／部署與啟用（標準安裝版自動引導 UAC）。"""
+        paths = WB.resolve_windhawk_paths()
+        if not os.path.exists(paths["exe"]):
+            tb_st, sm_st, tr_st = self._engine_statuses()
+            return {
+                "ok": False,
+                "windhawk_missing": True,
+                "windhawk_installed": False,
+                "taskbar_engine": tb_st,
+                "startmenu_engine": sm_st,
+                "tray_engine": tr_st,
+                "message": "尚未在電腦中找到 Windhawk，請先下載安裝或於下方手動選取 windhawk.exe",
+            }
+
+        if paths.get("storage_mode") == "registry" and not RT.is_admin():
+            ok = RT.relaunch_as_admin(["--setup-windhawk"])
+            return {
+                "ok": ok,
+                "elevating": ok,
+                "windhawk_installed": True,
+                "windhawk_needs_admin": not ok,
+                "message": (
+                    "已啟動管理員授權，請於 Windows 視窗按「是」以完成自動配置…"
+                    if ok
+                    else "未取得系統管理員權限（UAC 已取消），請按「是」才能將模組寫入標準安裝版 Windhawk"
+                ),
+            }
+
+        scopes = SM.effective_active_scopes() or ["desktop"]
+        res = SM.run_batch("apply", scopes, self._app.config)
+        out = self._batch_response("apply", res)
+        if out.get("ok"):
+            out["message"] = "已自動配置並啟用 Windhawk 全部區域（工作列／開始功能表／通知列／桌面）"
+        return out
+
+    def set_hide_wh_tasks_dialog(self, val: Any) -> dict[str, Any]:
+        """設定是否隱藏 Windhawk 右下角「正在進行的模組任務」提示白框（ModTasksDialogDelay）。"""
+        return WB.set_tasks_dialog_hidden(bool(val))
 
     # Lines 137-205: 套用 / 還原與系統管理員提權控制
     def _batch_response(self, kind: str, res: list[dict[str, Any]] | None) -> dict[str, Any]:

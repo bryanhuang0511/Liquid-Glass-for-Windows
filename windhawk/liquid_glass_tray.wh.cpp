@@ -2246,6 +2246,14 @@ int32_t WINAPI SystemTrayFrame_ArrangeOverride_Hook(void* pThis, uint64_t finalS
     return hr;
 }
 
+MeasureOverride_t SystemTrayFrame_MeasureOverride_Original = nullptr;
+int32_t WINAPI SystemTrayFrame_MeasureOverride_Hook(void* pThis, uint64_t availSizeBits, void* pReturnSize) {
+    int32_t hr = SystemTrayFrame_MeasureOverride_Original(pThis, availSizeBits, pReturnSize);
+    g_measureCalls.fetch_add(1, std::memory_order_relaxed);
+    SweepContainerOnArrange(pThis, g_trayFrameWeak, g_lastTraySweepTick, g_lastTraySweepGen, 250, &g_systemTrayFound);
+    return hr;
+}
+
 int32_t WINAPI Overflow_ArrangeOverride_Hook(void* pThis, uint64_t finalSizeBits, void* pReturnSize) {
     int32_t hr = Overflow_ArrangeOverride_Original(pThis, finalSizeBits, pReturnSize);
     g_overflowCalls.fetch_add(1, std::memory_order_relaxed);
@@ -2360,132 +2368,130 @@ BOOL Wh_ModInit() {
     InitStatusPath();
     LoadSettings();
 
-    HMODULE sysTray = GetModuleHandleW(L"SystemTray.dll");
-    if (!sysTray) {
-        Wh_Log(L"SystemTray.dll not loaded yet");
-        FlushStatusFile(true);
-        return FALSE;
-    }
+    if (HMODULE sysTray = GetModuleHandleW(L"SystemTray.dll")) {
+        WindhawkUtils::SYMBOL_HOOK trayHooks[] = {
+            {
+                {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::SystemTrayFrame,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::ArrangeOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
+                &SystemTrayFrame_ArrangeOverride_Original,
+                SystemTrayFrame_ArrangeOverride_Hook,
+                true,
+            },
+            {
+                {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::SystemTrayFrame,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::MeasureOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
+                &SystemTrayFrame_MeasureOverride_Original,
+                SystemTrayFrame_MeasureOverride_Hook,
+                true,
+            },
+            {
+                {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::NotificationAreaOverflow,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::ArrangeOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
+                &Overflow_ArrangeOverride_Original,
+                Overflow_ArrangeOverride_Hook,
+                true,
+            },
+            {
+                {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::NotificationAreaOverflow,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::OnApplyTemplate(void))"},
+                &Overflow_OnApplyTemplate_Original,
+                Overflow_OnApplyTemplate_Hook,
+                true,
+            },
+            {
+                {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::ImageIconContent,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::MeasureOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
+                &ImageIconContent_MeasureOverride_Original,
+                ImageIconContent_MeasureOverride_Hook,
+                true,
+            },
+            {
+                {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::ImageIconContentViewModel,struct winrt::SystemTray::IImageIconContentViewModel>::put_IconImageSource(void *))"},
+                &ImageIconVM_put_IconImageSource_Original,
+                ImageIconVM_put_IconImageSource_Hook,
+                true,
+            },
+            {
+                {LR"(private: void __cdecl winrt::SystemTray::OverflowXamlIslandManager::InitializeIfNeeded(void))"},
+                &OverflowManager_InitializeIfNeeded_Original,
+                OverflowManager_InitializeIfNeeded_Hook,
+                true,
+            },
+            {
+                {LR"(public: void __cdecl winrt::SystemTray::OverflowXamlIslandManager::Show(struct tagPOINT,enum winrt::WindowsUdk::UI::Shell::InputDeviceKind))"},
+                &OverflowManager_Show_Original,
+                OverflowManager_Show_Hook,
+                true,
+            },
+            {
+                {LR"(private: void __cdecl winrt::SystemTray::implementation::SystemTrayController::UpdateNotificationAreaOverflowIcons(void))"},
+                &SystemTrayController_UpdateOverflowIcons_Original,
+                SystemTrayController_UpdateOverflowIcons_Hook,
+                true,
+            },
+            {
+                {
+                    LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconView>)",
+                    LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconView>)",
+                },
+                &g_pIidIconView,
+                nullptr,
+                true,
+            },
+            {
+                {
+                    LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconViewModel>)",
+                    LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconViewModel>)",
+                },
+                &g_pIidIconViewModel,
+                nullptr,
+                true,
+            },
+            {
+                {
+                    LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconConfiguration>)",
+                    LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconConfiguration>)",
+                },
+                &g_pIidIconConfiguration,
+                nullptr,
+                true,
+            },
+            {
+                {
+                    LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::INotificationAreaIconsDataModel>)",
+                    LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::INotificationAreaIconsDataModel>)",
+                },
+                &g_pIidNotifAreaDataModel,
+                nullptr,
+                true,
+            },
+            {
+                {
+                    LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::WindowsUdk::UI::Shell::INotificationAreaIcon6>)",
+                    LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::WindowsUdk::UI::Shell::INotificationAreaIcon6>)",
+                },
+                &g_pIidNotifAreaIcon6,
+                nullptr,
+                true,
+            },
+            {
+                {
+                    LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentView>)",
+                    LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentView>)",
+                },
+                &g_pIidIconContentView,
+                nullptr,
+                true,
+            },
+            {
+                {
+                    LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentViewModel>)",
+                    LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentViewModel>)",
+                },
+                &g_pIidIconContentViewModel,
+                nullptr,
+                true,
+            },
+        };
 
-    WindhawkUtils::SYMBOL_HOOK trayHooks[] = {
-        {
-            {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::SystemTrayFrame,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::ArrangeOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
-            &SystemTrayFrame_ArrangeOverride_Original,
-            SystemTrayFrame_ArrangeOverride_Hook,
-        },
-        {
-            {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::NotificationAreaOverflow,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::ArrangeOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
-            &Overflow_ArrangeOverride_Original,
-            Overflow_ArrangeOverride_Hook,
-            true,
-        },
-        {
-            {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::NotificationAreaOverflow,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::OnApplyTemplate(void))"},
-            &Overflow_OnApplyTemplate_Original,
-            Overflow_OnApplyTemplate_Hook,
-            true,
-        },
-        {
-            {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::ImageIconContent,struct winrt::Windows::UI::Xaml::IFrameworkElementOverrides>::MeasureOverride(struct winrt::Windows::Foundation::Size,struct winrt::Windows::Foundation::Size *))"},
-            &ImageIconContent_MeasureOverride_Original,
-            ImageIconContent_MeasureOverride_Hook,
-            true,
-        },
-        {
-            {LR"(public: virtual int __cdecl winrt::impl::produce<struct winrt::SystemTray::implementation::ImageIconContentViewModel,struct winrt::SystemTray::IImageIconContentViewModel>::put_IconImageSource(void *))"},
-            &ImageIconVM_put_IconImageSource_Original,
-            ImageIconVM_put_IconImageSource_Hook,
-            true,
-        },
-        {
-            {LR"(private: void __cdecl winrt::SystemTray::OverflowXamlIslandManager::InitializeIfNeeded(void))"},
-            &OverflowManager_InitializeIfNeeded_Original,
-            OverflowManager_InitializeIfNeeded_Hook,
-            true,
-        },
-        {
-            {LR"(public: void __cdecl winrt::SystemTray::OverflowXamlIslandManager::Show(struct tagPOINT,enum winrt::WindowsUdk::UI::Shell::InputDeviceKind))"},
-            &OverflowManager_Show_Original,
-            OverflowManager_Show_Hook,
-            true,
-        },
-        {
-            {LR"(private: void __cdecl winrt::SystemTray::implementation::SystemTrayController::UpdateNotificationAreaOverflowIcons(void))"},
-            &SystemTrayController_UpdateOverflowIcons_Original,
-            SystemTrayController_UpdateOverflowIcons_Hook,
-            true,
-        },
-        {
-            {
-                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconView>)",
-                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconView>)",
-            },
-            &g_pIidIconView,
-            nullptr,
-            true,
-        },
-        {
-            {
-                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconViewModel>)",
-                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconViewModel>)",
-            },
-            &g_pIidIconViewModel,
-            nullptr,
-            true,
-        },
-        {
-            {
-                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconConfiguration>)",
-                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconConfiguration>)",
-            },
-            &g_pIidIconConfiguration,
-            nullptr,
-            true,
-        },
-        {
-            {
-                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::INotificationAreaIconsDataModel>)",
-                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::INotificationAreaIconsDataModel>)",
-            },
-            &g_pIidNotifAreaDataModel,
-            nullptr,
-            true,
-        },
-        {
-            {
-                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::WindowsUdk::UI::Shell::INotificationAreaIcon6>)",
-                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::WindowsUdk::UI::Shell::INotificationAreaIcon6>)",
-            },
-            &g_pIidNotifAreaIcon6,
-            nullptr,
-            true,
-        },
-        {
-            {
-                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentView>)",
-                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentView>)",
-            },
-            &g_pIidIconContentView,
-            nullptr,
-            true,
-        },
-        {
-            {
-                LR"(struct guid::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentViewModel>)",
-                LR"(struct winrt::guid const winrt::impl::guid_v<struct winrt::SystemTray::IIconContentViewModel>)",
-            },
-            &g_pIidIconContentViewModel,
-            nullptr,
-            true,
-        },
-    };
-
-    if (!WindhawkUtils::HookSymbols(sysTray, trayHooks, ARRAYSIZE(trayHooks))) {
-        Wh_Log(L"HookSymbols(SystemTray.dll) failed");
-        g_hookInstalled.store(false, std::memory_order_release);
-        g_errorCount.fetch_add(1, std::memory_order_relaxed);
-        FlushStatusFile(true);
-        return FALSE;
+        WindhawkUtils::HookSymbols(sysTray, trayHooks, ARRAYSIZE(trayHooks));
+    } else {
+        Wh_Log(L"SystemTray.dll not loaded yet; relying on Taskbar fallback hooks");
     }
 
     if (HMODULE tbView = GetModuleHandleW(L"Taskbar.View.dll")) {
@@ -2530,12 +2536,33 @@ BOOL Wh_ModInit() {
         WindhawkUtils::HookSymbols(taskbarDll, taskbarDllHooks, ARRAYSIZE(taskbarDllHooks));
     }
 
+    const bool anyHook = (
+        SystemTrayFrame_ArrangeOverride_Original != nullptr ||
+        SystemTrayFrame_MeasureOverride_Original != nullptr ||
+        Overflow_ArrangeOverride_Original != nullptr ||
+        Overflow_OnApplyTemplate_Original != nullptr ||
+        ImageIconContent_MeasureOverride_Original != nullptr ||
+        ImageIconVM_put_IconImageSource_Original != nullptr ||
+        OverflowManager_InitializeIfNeeded_Original != nullptr ||
+        OverflowManager_Show_Original != nullptr ||
+        SystemTrayController_UpdateOverflowIcons_Original != nullptr ||
+        TaskbarFrame_MeasureOverride_Original != nullptr ||
+        CTaskBand_GetTaskbarHost_Original != nullptr);
+    if (!anyHook) {
+        Wh_Log(L"No SystemTray or Taskbar fallback hooks resolved");
+        g_hookInstalled.store(false, std::memory_order_release);
+        g_errorCount.fetch_add(1, std::memory_order_relaxed);
+        FlushStatusFile(true);
+        return FALSE;
+    }
+
     g_hookInstalled.store(true, std::memory_order_release);
-    Wh_Log(L"LiquidGlassSystemTray initialized: TrayArr=%p OvArr=%p OvTpl=%p OvInit=%p OvShow=%p OvUpd=%p ImgMeas=%p TbHost=%p",
-           SystemTrayFrame_ArrangeOverride_Original, Overflow_ArrangeOverride_Original,
-           Overflow_OnApplyTemplate_Original, OverflowManager_InitializeIfNeeded_Original,
-           OverflowManager_Show_Original, SystemTrayController_UpdateOverflowIcons_Original,
-           ImageIconContent_MeasureOverride_Original, CTaskBand_GetTaskbarHost_Original);
+    Wh_Log(L"LiquidGlassSystemTray initialized: TrayArr=%p TrayMeas=%p OvArr=%p OvTpl=%p OvInit=%p OvShow=%p OvUpd=%p ImgMeas=%p TbMeas=%p TbHost=%p",
+           SystemTrayFrame_ArrangeOverride_Original, SystemTrayFrame_MeasureOverride_Original,
+           Overflow_ArrangeOverride_Original, Overflow_OnApplyTemplate_Original,
+           OverflowManager_InitializeIfNeeded_Original, OverflowManager_Show_Original,
+           SystemTrayController_UpdateOverflowIcons_Original, ImageIconContent_MeasureOverride_Original,
+           TaskbarFrame_MeasureOverride_Original, CTaskBand_GetTaskbarHost_Original);
     FlushStatusFile(true);
     return TRUE;
 }

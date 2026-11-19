@@ -2,6 +2,18 @@
 
 All notable changes to **Liquid Glass for Windows** will be documented in this file.
 
+## [v3.0.0] - 2026-11-20
+### Changed
+- **Zero-Warning Control Center & Auto-Setup Onboarding (`ui/index.html`, `liquid_glass/web_api.py`, `main.py`)**: Removed redundant admin/advisory warning banners. When Windhawk is absent, the app defaults seamlessly to Desktop-only mode and guides users in 2 clicks (`⬇️ 下載 Windhawk` + `✨ 我已安裝，自動偵測並設定模組`) with 5-second background detection, custom `windhawk.exe` path picker, and automatic UAC elevation (`--setup-windhawk`) for Standard Windhawk installs.
+
+### Fixed
+- **Standard Windhawk (`Portable=0`) UTF-16 LE BOM `windhawk.ini` Parsing (`liquid_glass/windhawk_bridge.py`)**: Replaced strict `utf-8-sig` INI decoding with automatic BOM/UTF-16 detection (`_read_ini_text_with_bom`), preventing silent fallback to Portable paths and automatically cleaning stale misplaced `local@liquid-glass-*` files from `<WindhawkRoot>\AppData\Engine\Mods\`.
+- **System Tray Hook Compatibility Across Windows 11 Builds (`windhawk/liquid_glass_tray.wh.cpp`)**: Marked `SystemTrayFrame::ArrangeOverride` optional, added `SystemTrayFrame::MeasureOverride` fallback, and enabled module initialization whenever any `SystemTray.dll`, `Taskbar.View.dll`, or `taskbar.dll` (`GetTaskbarXamlRoot`) hook succeeds (`hook_ok: true` across Win11 22H2–25H2).
+- **Start Menu Pinned Folder Thumbnails (`windhawk/liquid_glass_startmenu.wh.cpp`)**: Lowered minimum visual-tree image match threshold from `10px` to `8px` alongside `QueueColdCapture` so 100% DPI 2x2 folder thumbnails are captured uniformly.
+
+### Added
+- **Symbol Initialization State & Optional Task-Dialog Delay Control (`liquid_glass/windhawk_bridge.py`, `ui/index.html`)**: Surfaces `initializing_symbols` status while Windhawk fetches PDB symbols for the first time, plus an optional `swHideWhTasks` toggle (`ModTasksDialogDelay` `3600000` vs `2000` ms across INI/HKLM storage). Expanded automated verification to `93` test cases.
+
 ## [v2.2.2] - 2026-11-19
 ### Fixed
 - **Start Menu Inner Folder & Modal Icon Transformation (`windhawk/liquid_glass_startmenu.wh.cpp`)**: Fixed icons inside expanded Start Menu folders (`StartMenu.FolderModal#StartFolderModal`, `StartMenu.ExpandedFolderList`, All Apps subfolders such as `Chrome 應用程式`) remaining untransformed. Now walks up to the top XAML `RootVisual` (covering `PopupRoot`), traverses `Popup.Child()` and `GetOpenPopupsForXamlRoot`, transforms icon-sized (`16..256px`) `SoftwareBitmapSource` objects inline inside `SetBitmapAsync_Hook` with automatic UI-element disallow/restore guards (`UserTile`, `AccountControl`, `PersonPicture`, `SearchBox`), resets `captureAttemptedGen` when capturing mid-animation frames, and runs trailing/visible-window scans.

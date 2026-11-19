@@ -225,38 +225,39 @@ def test_ui_html_has_wiztree_non_blocking_banner(env):
     with open(RT.UI_HTML_PATH, "r", encoding="utf-8") as handle:
         html = handle.read()
     for token in (
-        "elevateBanner",
-        "btnElevateRelaunch",
         "adminPill",
-        "relaunch_admin",
-        "get_startup_scope",
-        "is_admin",
         "btnApplyAll",
         "btnRestoreAll",
         "engCardTitle",
         "renderEngineTelemetry",
         "get_engine_status",
-        "whOptionalBox",
-        "visualAdvisoryBox",
-        "btnRecheckWh",
-        "btnCopyWhUrl",
+        "whSetupBox",
+        "btnAutoSetupWh",
+        "auto_setup_windhawk",
         "btnOpenWhSite",
         "btnBrowseWh",
         "txtWhPath",
         "btnSaveWhPath",
-        "btnChangeWhDir",
-        "engWhPathInfo",
+        "swHideWhTasks",
+        "set_hide_wh_tasks_dialog",
+        "initializing_symbols",
         "btnWlAddMemReduct",
         "isWhAvailable",
         "optional-off",
-        "僅桌面模式",
         "repeat(4, 1fr)",
         "tray_engine",
         "ENGINE_META",
         "一鍵套用全部四區",
     ):
         assert token in html
-    for stale in ("桌面・開始功能表目前封鎖", "開始功能表封鎖中", "開始功能表暫未開放"):
+    for stale in (
+        "桌面・開始功能表目前封鎖",
+        "開始功能表封鎖中",
+        "開始功能表暫未開放",
+        "id=\"elevateBanner\"",
+        "id=\"visualAdvisoryBox\"",
+        "id=\"adminHint\"",
+    ):
         assert stale not in html
 
 
@@ -441,4 +442,47 @@ def test_tray_whitelist_api_syncs_and_persists(env):
     assert json.load(open(RT.CONFIG_PATH, encoding="utf-8"))["windhawk_dir"] == os.path.normpath(os.environ["LGFW_WINDHAWK_DIR"])
     reset_wh = api.set_windhawk_dir("")
     assert reset_wh["custom_windhawk_dir"] == ""
+
+
+def test_auto_setup_windhawk_portable_standard_uac_and_missing(env, tmp_path, monkeypatch):
+    populate(env)
+    app = TC.LiquidGlassApp()
+    api = WA.LiquidGlassApi(app)
+
+    # 1. Portable Windhawk installed -> auto_setup_windhawk deploys & activates all 4 scopes directly
+    auto_ok = api.auto_setup_windhawk()
+    assert auto_ok["ok"] is True
+    assert WB.get_status(scope="taskbar")["enabled"] is True
+    assert WB.get_status(scope="startmenu")["enabled"] is True
+    assert WB.get_status(scope="tray")["enabled"] is True
+
+    # 2. Standard Windhawk (UTF-16 LE windhawk.ini, Portable=0) when non-admin -> triggers UAC --setup-windhawk
+    std_wh = tmp_path / "StdAutoWh"
+    (std_wh / "Engine" / "1.7.3" / "64").mkdir(parents=True)
+    (std_wh / "windhawk.exe").write_bytes(b"WH")
+    (std_wh / "windhawk.ini").write_bytes(
+        "[Storage]\r\nPortable=0\r\nEnginePath=Engine\\1.7.3\r\nRegistryKey=HKLM\\SOFTWARE\\Windhawk\r\n".encode("utf-16")
+    )
+    monkeypatch.setenv("LGFW_WINDHAWK_DIR", str(std_wh))
+    monkeypatch.setenv("LGIC_WINDHAWK_DIR", str(std_wh))
+    monkeypatch.setattr(RT, "is_admin", lambda: False)
+    uac_calls = []
+    monkeypatch.setattr(RT, "relaunch_as_admin", lambda args, show=0: uac_calls.append(args) or True)
+    auto_uac = api.auto_setup_windhawk()
+    assert auto_uac["ok"] is True and auto_uac.get("elevating") is True
+    assert uac_calls == [["--setup-windhawk"]]
+
+    # 3. Elevated --setup-windhawk CLI applies scopes & writes admin_last_result.json
+    monkeypatch.setattr(RT, "is_admin", lambda: True)
+    monkeypatch.setenv("LGFW_WINDHAWK_DIR", str(tmp_path / "windhawk"))
+    monkeypatch.setenv("LGIC_WINDHAWK_DIR", str(tmp_path / "windhawk"))
+    assert env.main.main(["--setup-windhawk"]) == 0
+    ar = api.get_admin_result()
+    assert ar["kind"] == "setup_windhawk" and set(ar["scopes"]) == {"taskbar", "startmenu", "desktop", "tray"}
+
+    # 4. Windhawk missing -> graceful missing guidance
+    monkeypatch.setenv("LGFW_WINDHAWK_DIR", str(tmp_path / "missing_wh"))
+    monkeypatch.setenv("LGIC_WINDHAWK_DIR", str(tmp_path / "missing_wh"))
+    auto_miss = api.auto_setup_windhawk()
+    assert auto_miss["ok"] is False and auto_miss["windhawk_missing"] is True
 
